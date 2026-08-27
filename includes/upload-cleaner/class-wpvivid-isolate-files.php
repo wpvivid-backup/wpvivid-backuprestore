@@ -309,21 +309,23 @@ class WPvivid_Isolate_Files
     {
         global $wpdb;
 
-        $file=basename($file);
+        $file=basename((string)$file);
 
-        $sql = "SELECT post_id
+        $sql = $wpdb->prepare(
+            "SELECT post_id
 			FROM {$wpdb->postmeta}
-			WHERE meta_key = '_wp_attachment_metadata'
-			AND meta_value LIKE '%$file%'";
-
+			WHERE meta_key = %s
+			AND meta_value LIKE %s",
+            '_wp_attachment_metadata',
+            '%'.$wpdb->esc_like($file).'%'
+        );
         $ret = $wpdb->get_var( $sql );
-
         if(!$ret)
         {
             $sql = $wpdb->prepare( "SELECT post_id
 			FROM {$wpdb->postmeta}
-			WHERE meta_key = '_wp_attached_file'
-			AND meta_value = %s", $file
+			WHERE meta_key = %s
+			AND meta_value = %s", '_wp_attached_file', $file
             );
             $ret = $wpdb->get_var( $sql );
         }
