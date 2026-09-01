@@ -9,7 +9,7 @@ require_once WPVIVID_PLUGIN_DIR .'/includes/customclass/class-wpvivid-remote.php
 
 class WPvivid_SFTPClass extends WPvivid_Remote{
     private $package_size = 10;
-    private $timeout = 20;
+    private $timeout = 120;
     private $error_str=false;
     private $callback;
     private $options=array();

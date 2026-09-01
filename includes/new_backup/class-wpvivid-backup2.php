@@ -1854,6 +1854,10 @@ class WPvivid_Backup_2
         $exclude_default[20]['path'] = WP_CONTENT_DIR.'/'.'wpvivid_uploads';
         $exclude_default[21]['type'] = 'folder';
         $exclude_default[21]['path'] = WP_CONTENT_DIR.'/'.'WPvivid_Uploads';
+        $exclude_default[22]['type'] = 'folder';
+        $exclude_default[22]['path'] = WP_CONTENT_DIR.'/'.'compressx';
+        $exclude_default[23]['type'] = 'folder';
+        $exclude_default[23]['path'] = WP_CONTENT_DIR.'/'.'compressx-nextgen';
 
         if(!empty($exclude_default))
         {

@@ -3368,6 +3368,12 @@ class WPvivid_Uploads_Cleaner
             $json = stripslashes($json);
             $json = json_decode($json, true);
 
+            if(!is_array($json) || !isset($json['selected']) || !is_array($json['selected']))
+            {
+                echo wp_json_encode(array('result'=>'failed','error'=>'Invalid file list.'));
+                die();
+            }
+
             $files=array_map( 'sanitize_text_field', $json['selected']);
 
             $iso=new WPvivid_Isolate_Files();
@@ -3377,13 +3383,13 @@ class WPvivid_Uploads_Cleaner
             $search='';
             if(isset($_POST['search']))
             {
-                $search=sanitize_text_field($_POST['search']);
+                $search=sanitize_text_field(wp_unslash($_POST['search']));
             }
 
             $folder='';
             if(isset($_POST['folder']))
             {
-                $folder=sanitize_text_field($_POST['folder']);
+                $folder=sanitize_text_field(wp_unslash($_POST['folder']));
             }
 
             $list=new WPvivid_Isolate_Files_List();
@@ -3490,6 +3496,12 @@ class WPvivid_Uploads_Cleaner
             $json = $_POST['selected'];
             $json = stripslashes($json);
             $json = json_decode($json, true);
+
+            if(!is_array($json) || !isset($json['selected']) || !is_array($json['selected']))
+            {
+                echo wp_json_encode(array('result'=>'failed','error'=>'Invalid file list.'));
+                die();
+            }
 
             $files=$json['selected'];
 
