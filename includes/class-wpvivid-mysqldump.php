@@ -797,7 +797,7 @@ class WPvivid_Mysqldump
     {
         if (!$this->dumpSettings['skip-comments']) {
             $ret = "--" . PHP_EOL .
-                "-- Stand-In structure for view `${viewName}`" . PHP_EOL .
+                "-- Stand-In structure for view `{$viewName}`" . PHP_EOL .
                 "--" . PHP_EOL . PHP_EOL;
             $this->compressManager->write($ret);
         }
@@ -828,7 +828,7 @@ class WPvivid_Mysqldump
     function createStandInTable($viewName) {
         $ret = array();
         foreach($this->tableColumnTypes[$viewName] as $k => $v) {
-            $ret[] = "`${k}` ${v['type_sql']}";
+            $ret[] = "`{$k}` {$v['type_sql']}";
         }
 
         $ret = implode(PHP_EOL . ",", $ret);
@@ -850,7 +850,7 @@ class WPvivid_Mysqldump
     {
         if (!$this->dumpSettings['skip-comments']) {
             $ret = "--" . PHP_EOL .
-                "-- View structure for view `${viewName}`" . PHP_EOL .
+                "-- View structure for view `{$viewName}`" . PHP_EOL .
                 "--" . PHP_EOL . PHP_EOL;
             $this->compressManager->write($ret);
         }
@@ -955,7 +955,7 @@ class WPvivid_Mysqldump
                 $ret[] = "NULL";
             } elseif ($this->dumpSettings['hex-blob'] && $columnTypes[$colName]['is_blob']) {
                 if ($columnTypes[$colName]['type'] == 'bit' || !empty($colValue)) {
-                    $ret[] = "0x${colValue}";
+                    $ret[] = "0x{$colValue}";
                 } else {
                     $ret[] = "''";
                 }
@@ -1312,14 +1312,14 @@ class WPvivid_Mysqldump
         $colStmt = array();
         foreach($this->tableColumnTypes[$tableName] as $colName => $colType) {
             if ($colType['type'] == 'bit' && $this->dumpSettings['hex-blob']) {
-                $colStmt[] = "LPAD(HEX(`${colName}`),2,'0') AS `${colName}`";
+                $colStmt[] = "LPAD(HEX(`{$colName}`),2,'0') AS `{$colName}`";
             } else if ($colType['is_blob'] && $this->dumpSettings['hex-blob']) {
-                $colStmt[] = "HEX(`${colName}`) AS `${colName}`";
+                $colStmt[] = "HEX(`{$colName}`) AS `{$colName}`";
             } else if ($colType['is_virtual']) {
                 $this->dumpSettings['complete-insert'] = true;
                 continue;
             } else {
-                $colStmt[] = "`${colName}`";
+                $colStmt[] = "`{$colName}`";
             }
         }
 

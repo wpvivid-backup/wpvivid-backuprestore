@@ -973,9 +973,7 @@ class WPvivid_Backup_Task_2
 
     public function transfer_path($path)
     {
-        $path = str_replace('\\','/',$path);
-        $values = explode('/',$path);
-        return implode('/',$values);
+        return wp_normalize_path($path);
     }
 
     public function get_backup_root($backup_type)
@@ -1632,8 +1630,24 @@ class WPvivid_Backup_Task_2
             $use_pclzip=true;
         }
 
+        $zip_name = $this->get_zip_file($backup_type);
 
-        $zip_file_name=$path.$this->get_zip_file($backup_type);
+        if ($zip_name === false || $zip_name === '')
+        {
+            $zip_name = $this->add_zip_file($backup_type);
+            $wpvivid_plugin->wpvivid_log->WriteLog('Resume backup: created next ZIP package. file: '. $zip_name, 'notice');
+        }
+
+        if (!is_string($zip_name) || $zip_name === '')
+        {
+            return array(
+                'result' => 'failed',
+                'error' => 'Unable to determine the ZIP filename when resuming backup.'
+            );
+        }
+
+        $zip_file_name = $path.$zip_name;
+
         $json=array();
         $json=$this->get_json_info($backup_type,$json);
 
@@ -2048,7 +2062,26 @@ class WPvivid_Backup_Task_2
             $use_pclzip=true;
         }
 
-        $zip_file_name=$path.$this->get_zip_file($backup_type);
+        $zip_name = $this->get_zip_file($backup_type);
+
+        if ($zip_name === false || $zip_name === '')
+        {
+            // The previous ZIP was marked finished before the request
+            // stopped, but the next ZIP was not saved.
+            $zip_name = $this->add_zip_file($backup_type);
+            $wpvivid_plugin->wpvivid_log->WriteLog('Resume backup: created next ZIP package. file: '.$zip_name, 'notice');
+        }
+
+        if (!is_string($zip_name) || $zip_name === '')
+        {
+            return array(
+                'result' => 'failed',
+                'error' => 'Unable to determine the ZIP filename when resuming backup.'
+            );
+        }
+
+        $zip_file_name = $path.$zip_name;
+
         $json=array();
         $json=$this->get_json_info($backup_type,$json);
         $eof=false;

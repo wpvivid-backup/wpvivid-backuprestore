@@ -660,9 +660,23 @@ class WPvivid_Staging_Create_UI_Display_Free
                         jQuery('#wpvivid_create_staging_step2').show();
                         wpvivid_post_request(ajax_data, function (data)
                         {
-                            setTimeout(function () {
-                                wpvivid_get_staging_progress();
-                            }, staging_requet_timeout);
+                            try
+                            {
+                                var created = jQuery.parseJSON(data);
+                                if (!created || created.result !== 'success' || !created.task_id)
+                                {
+                                    throw new Error(created && created.error ? created.error : 'Failed to create the staging task.');
+                                }
+                                wpvivid_restart_staging(created.task_id);
+                            }
+                            catch (error)
+                            {
+                                jQuery('#wpvivid_choose_staging_content').show();
+                                jQuery('#wpvivid_create_btn').show();
+                                jQuery('#wpvivid_create_staging_step2').hide();
+                                wpvivid_create_staging_lock_unlock('unlock');
+                                alert(error.message || error);
+                            }
                         }, function (XMLHttpRequest, textStatus, errorThrown)
                         {
                             jQuery('#wpvivid_choose_staging_content').hide();
@@ -679,13 +693,32 @@ class WPvivid_Staging_Create_UI_Display_Free
                 });
             }
 
-            function wpvivid_restart_staging() {
+            function wpvivid_restart_staging(task_id) {
                 var ajax_data = {
-                    'action':'wpvividstg_start_staging_free',
+                    'action':'wpvividstg_do_task_free',
+                        'task_id': task_id,
                 };
 
                 wpvivid_post_request(ajax_data, function(data)
                 {
+                    try
+                    {
+                        var executed = jQuery.parseJSON(data);
+                        if (!executed || executed.result !== 'success')
+                        {
+                            throw new Error(executed && executed.error ? executed.error : 'Failed to execute the staging task.');
+                        }
+                    }
+                    catch (error)
+                    {
+                        jQuery('#wpvivid_choose_staging_content').show();
+                        jQuery('#wpvivid_create_btn').show();
+                        jQuery('#wpvivid_create_staging_step2').hide();
+                        wpvivid_create_staging_lock_unlock('unlock');
+                        alert(error.message || error);
+                        return;
+                    }
+
                     setTimeout(function()
                     {
                         wpvivid_get_staging_progress();
@@ -730,7 +763,7 @@ class WPvivid_Staging_Create_UI_Display_Free
                             {
                                 if(jsonarray.need_restart)
                                 {
-                                    wpvivid_restart_staging();
+                                    wpvivid_restart_staging(jsonarray.task_id);
                                 }
                                 else
                                 {
@@ -755,18 +788,9 @@ class WPvivid_Staging_Create_UI_Display_Free
                                     div[0].scrollTop = div[0].scrollHeight;
                                 }
                                 else if(typeof jsonarray.is_cancel !== 'undefined' && jsonarray.is_cancel){
-                                    var staging_site_info = {};
-                                    staging_site_info['staging_path'] = jsonarray.staging_path;
-                                    staging_site_info['staging_additional_db'] = jsonarray.staging_additional_db;
-                                    staging_site_info['staging_additional_db_user'] = jsonarray.staging_additional_db_user;
-                                    staging_site_info['staging_additional_db_pass'] = jsonarray.staging_additional_db_pass;
-                                    staging_site_info['staging_additional_db_host'] = jsonarray.staging_additional_db_host;
-                                    staging_site_info['staging_additional_db_name'] = jsonarray.staging_additional_db_name;
-                                    staging_site_info['staging_table_prefix'] = jsonarray.staging_table_prefix;
-                                    staging_site_info = JSON.stringify(staging_site_info);
                                     ajax_data = {
                                         'action': 'wpvividstg_delete_cancel_staging_site_free',
-                                        'staging_site_info': staging_site_info
+                                        'task_id': jsonarray.task_id
                                     };
                                     wpvivid_post_request(ajax_data, function (data) {
                                         jQuery('#wpvivid_staging_cancel').css({'pointer-events': 'auto', 'opacity': '1'});

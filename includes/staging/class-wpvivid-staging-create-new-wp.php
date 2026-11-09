@@ -59,6 +59,12 @@ class WPvivid_Staging_Install_Wordpress_Free
         $data['live_site_staging_url']=apply_filters('wpvividstg_get_admin_url', '').'admin.php?page='.apply_filters('wpvivid_white_label_plugin_name', 'WPvivid_Staging');
         $data=serialize($data);
 
+        // Claim the exact core tables before wp_install can create or update them.
+        foreach ($wpdb->tables('all', false) as $table_suffix)
+        {
+            $wpvivid_plugin->staging->authorize_staging_table($this->task->get_id(), $prefix . $table_suffix);
+        }
+
         $old_wpdb=$wpdb;
 
         $wpdb=$this->get_db_instance(true);

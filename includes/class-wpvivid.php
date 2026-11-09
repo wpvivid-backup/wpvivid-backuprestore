@@ -312,9 +312,40 @@ class WPvivid
 
 	public function init_pclzip_tmp_folder()
     {
-        if (!defined('PCLZIP_TEMPORARY_DIR')) {
-            $backupdir=WPvivid_Setting::get_backupdir();
-            define( 'PCLZIP_TEMPORARY_DIR', WP_CONTENT_DIR.DIRECTORY_SEPARATOR.$backupdir.DIRECTORY_SEPARATOR );
+        if (defined('PCLZIP_TEMPORARY_DIR'))
+        {
+            return;
+        }
+
+        try
+        {
+            $backupdir = WPvivid_Setting::get_backupdir();
+            define('PCLZIP_TEMPORARY_DIR', WP_CONTENT_DIR . DIRECTORY_SEPARATOR . $backupdir . DIRECTORY_SEPARATOR);
+        }
+        catch (Exception $error)
+        {
+            $message = 'WPvivid: The backup directory is unavailable. '
+                . $error->getMessage()
+                . ' Please check the local backup folder setting '
+                . 'and directory permissions.';
+
+            $show_notice = function () use ($message)
+            {
+                if (!current_user_can('manage_options'))
+                {
+                    return;
+                }
+
+                echo '<div class="notice notice-error"><p>'
+                    . esc_html($message)
+                    . '</p></div>';
+            };
+
+            add_action('admin_notices', $show_notice);
+            add_action('network_admin_notices', $show_notice);
+
+            // Do not configure an invalid temporary directory.
+            return;
         }
     }
 
@@ -4743,11 +4774,8 @@ class WPvivid
             die();
         };
         try {
-            $dir = WPvivid_Setting::get_option('wpvivid_local_setting');
-
-            if (!isset($dir['path'])) {
-                $dir = WPvivid_Setting::set_default_local_option();
-            }
+            // Resolve stored settings through the validated backup directory getter.
+            $dir = array('path' => WPvivid_Setting::get_backupdir());
 
             if (!is_dir(WP_CONTENT_DIR . DIRECTORY_SEPARATOR . $dir['path'])) {
                 @mkdir(WP_CONTENT_DIR . DIRECTORY_SEPARATOR . $dir['path'], 0777, true);
@@ -5050,11 +5078,11 @@ class WPvivid
         }
         catch (Exception $e)
         {
-            $ret['log_path'] = $log_dir = WPvivid_tools::GetSaveLogFolder();
-            $dir = WPvivid_Setting::get_backupdir();
-            $ret['old_files_path'] = WP_CONTENT_DIR . DIRECTORY_SEPARATOR . $dir . DIRECTORY_SEPARATOR . WPVIVID_DEFAULT_ROLLBACK_DIR;
-            $dir = WP_CONTENT_DIR . DIRECTORY_SEPARATOR . $dir;
-            $ret['junk_path'] = $dir;
+            // Keep the settings page available when stored directories are invalid.
+            // Do not resolve the same invalid directory again inside the error handler.
+            $ret['log_path'] = '';
+            $ret['old_files_path'] = '';
+            $ret['junk_path'] = '';
             $ret['sum_size'] = '0';
             $ret['log_dir_size'] = '0';
             $ret['backup_cache_size'] = '0';
@@ -5598,6 +5626,9 @@ class WPvivid
         die();
     }
 
+    /**
+     * @throws \Exception When a backup directory is invalid or cannot be moved.
+     */
     public function wpvivid_set_general_setting($setting_data, $setting, $options)
     {
         $setting_data['wpvivid_common_setting']['backup_params'] = $setting['backup_params'];
@@ -5656,16 +5687,29 @@ class WPvivid
             $setting_data['wpvivid_email_setting']['email_enable'] = $setting['email_enable'];
         }
 
-        $setting['path']=esc_attr($setting['path']);
-        $setting_data['wpvivid_local_setting']['path'] = $setting['path'];
-
-        if($options['options']['wpvivid_local_setting']['path'] !== $setting['path'])
+        $new_name = $setting['path'];
+        $new_path = WPvivid_Setting::validate_child_directory(
+            WP_CONTENT_DIR,
+            $new_name
+        );
+        $old_name = $options['options']['wpvivid_local_setting']['path'];
+        if ($old_name !== $new_name)
         {
-            if(file_exists(WP_CONTENT_DIR.DIRECTORY_SEPARATOR.$options['options']['wpvivid_local_setting']['path']))
+            $old_path = WPvivid_Setting::validate_child_directory(
+                WP_CONTENT_DIR,
+                $old_name
+            );
+
+            // Move the old directory only when the new directory does not exist.
+            if (!file_exists($new_path) && file_exists($old_path))
             {
-                @rename(WP_CONTENT_DIR.DIRECTORY_SEPARATOR.$options['options']['wpvivid_local_setting']['path'], WP_CONTENT_DIR.DIRECTORY_SEPARATOR.$setting['path']);
+                if (!@rename($old_path, $new_path))
+                {
+                    throw new Exception('Failed to move the backup directory.');
+                }
             }
         }
+        $setting_data['wpvivid_local_setting']['path'] = $new_name;
 
         $setting_data['wpvivid_local_setting']['save_local'] = $options['options']['wpvivid_local_setting']['save_local'];
 
@@ -5827,7 +5871,6 @@ class WPvivid
             return $ret;
         }
 
-        //
         if(!isset($data['restore_max_execution_time']))
         {
             $ret['error']=__('The value of \'PHP scripts execution timeout for restore\' can\'t be empty.', 'wpvivid-backuprestore');
@@ -6002,18 +6045,22 @@ class WPvivid
             }
         }
 
-        //
-
-        if(!isset($data['path']))
+        if (!isset($data['path']) || !is_string($data['path']))
         {
             $ret['error']=__('The local storage path is required.', 'wpvivid-backuprestore');
+            return $ret;
         }
 
-        $data['path']=sanitize_text_field($data['path']);
-
-        if(empty($data['path']))
+        try
         {
-            $ret['error']=__('The local storage path is required.', 'wpvivid-backuprestore');
+            WPvivid_Setting::validate_child_directory(
+                WP_CONTENT_DIR,
+                $data['path']
+            );
+        }
+        catch (Exception $error)
+        {
+            $ret['error'] = $error->getMessage();
             return $ret;
         }
 
@@ -6425,7 +6472,17 @@ class WPvivid
         }
 
         $log=new WPvivid_Log();
-        $dir=$log->GetSaveLogFolder();
+        try
+        {
+            $dir=$log->GetSaveLogFolder();
+        }
+        catch (Exception $error)
+        {
+            // Listing logs must not prevent the settings page from loading.
+            // Do not read, create or fall back to another directory on failure.
+            $ret['log_directory_error'] = true;
+            return $ret;
+        }
         $files=array();
         $handler=opendir($dir);
         $regex='#^wpvivid.*_log.txt#';
@@ -7202,13 +7259,13 @@ class WPvivid
     }
 
     public function wpvivid_get_remote_directory($out_of_date_remote){
-        $out_of_date=$this->_get_out_of_date_info();
+        $remote_options = WPvivid_Setting::get_remote_options();
         $out_of_date_remote='There is no path for remote storage, please set it up first.';
 
-        if($out_of_date['remote_options'] !== false)
+        if($remote_options !== false)
         {
             $out_of_date_remote_temp = array();
-            foreach ($out_of_date['remote_options'] as $value)
+            foreach ($remote_options as $value)
             {
                 $out_of_date_remote=apply_filters('wpvivid_get_out_of_date_remote',$out_of_date_remote, $value);
                 $value['type']=apply_filters('wpvivid_storage_provider_tran', $value['type']);

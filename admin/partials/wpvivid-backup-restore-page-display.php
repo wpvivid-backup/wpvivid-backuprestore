@@ -2397,7 +2397,22 @@ function wpvivid_backuppage_add_backup_module(){
 }
 
 function wpvivid_backup_module_add_descript(){
-    $backupdir=WPvivid_Setting::get_backupdir();
+    try
+    {
+        $backupdir = WPvivid_Setting::get_backupdir();
+    }
+    catch (Exception $error)
+    {
+        echo '<div class="notice notice-error inline"><p>'
+            . esc_html(
+                'WPvivid: The backup directory is unavailable. '
+                . $error->getMessage()
+                . ' Please correct the local backup folder setting.'
+            )
+            . '</p></div>';
+
+        return;
+    }
     ?>
     <div style="font-size: 14px; padding: 8px 12px; margin: 0; line-height: 1.4; font-weight: 600;">
         <span style="margin-right: 5px;"><?php esc_html_e( 'Back Up Manually','wpvivid-backuprestore'); ?></span>

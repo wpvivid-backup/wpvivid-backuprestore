@@ -12,6 +12,7 @@ if ( ! class_exists( 'WP_List_Table' ) )
 class WPvivid_Staging_Free
 {
     public $main_tab;
+    public $ajax;
     public $end_shutdown_function;
     public $screen_ids;
 
@@ -51,7 +52,8 @@ class WPvivid_Staging_Free
             add_filter('wpvivid_get_admin_menus',array($this,'get_admin_menus'),22);
             add_filter('wpvivid_get_screen_ids',array($this,'get_screen_ids'),12);
 
-            $this->load_ajax();
+            require_once WPVIVID_PLUGIN_DIR . '/includes/staging/class-wpvivid-staging-ajax.php';
+            $this->ajax = new WPvivid_Staging_Ajax_Free($this);
         }
 
         add_filter('wpvividstg_get_admin_url',array($this,'get_admin_url'),10);
@@ -194,28 +196,6 @@ class WPvivid_Staging_Free
         return $html;
     }
 
-    public function load_ajax()
-    {
-        add_action('wp_ajax_wpvividstg_start_staging_free', array($this, 'start_staging'));
-        //add_action('wp_ajax_nopriv_wpvividstg_start_staging_free', array($this, 'start_staging'));
-        add_action('wp_ajax_wpvividstg_set_restart_staging_id_free', array($this, 'set_restart_staging_id'));
-        add_action('wp_ajax_wpvividstg_get_staging_progress_free', array($this, 'get_staging_progress'));
-        //add_action('wp_ajax_nopriv_wpvividstg_get_staging_progress_free', array($this, 'get_staging_progress'));
-        add_action('wp_ajax_wpvividstg_delete_site_free', array($this, 'delete_site'));
-        add_action('wp_ajax_wpvividstg_delete_cancel_staging_site_free', array($this, 'delete_cancel_staging_site'));
-        add_action('wp_ajax_wpvividstg_check_staging_dir_free', array($this, 'check_staging_dir'));
-        //
-        add_action('wp_ajax_wpvividstg_get_custom_database_tables_info_free',array($this, 'get_custom_database_tables_info'));
-
-        add_action('wp_ajax_wpvividstg_cancel_staging_free', array($this, 'cancel_staging'));
-        add_action('wp_ajax_wpvividstg_test_additional_database_connect_free', array($this, 'test_additional_database_connect'));
-        add_action('wp_ajax_wpvividstg_update_staging_exclude_extension_free', array($this, 'update_staging_exclude_extension'));
-        //
-
-        add_action('wp_ajax_wpvividstg_get_custom_database_size_free', array($this, 'get_custom_database_size'));
-        add_action('wp_ajax_wpvividstg_get_custom_files_size_free', array($this, 'get_custom_files_size'));
-    }
-
     public function enqueue_styles()
     {
         $this->screen_ids=apply_filters('wpvivid_get_screen_ids',$this->screen_ids);
@@ -301,48 +281,6 @@ class WPvivid_Staging_Free
         return untrailingslashit($home_url);
     }
 
-    public function get_custom_database_size(){
-        global $wpvivid_plugin;
-        check_ajax_referer( 'wpvivid_ajax', 'nonce' );
-        $check=current_user_can('manage_options');
-        $check=apply_filters('wpvivid_ajax_check_security',$check);
-        if(!$check)
-        {
-            die();
-        }
-        try
-        {
-            $ret['result']='success';
-
-            global $wpdb;
-            $tables = $wpdb->get_results('SHOW TABLE STATUS', ARRAY_A);
-            if (is_null($tables)) {
-                $ret['result'] = 'failed';
-                $ret['error'] = 'Failed to retrieve the table information for the database. Please try again.';
-                return $ret;
-            }
-
-            $db_size = 0;
-
-            $base_table_size = 0;
-            foreach ($tables as $row) {
-                $base_table_size += ($row["Data_length"] + $row["Index_length"]);
-            }
-
-            $db_size = size_format($base_table_size, 2);
-
-            $ret['database_size'] = $db_size;
-            echo wp_json_encode($ret);
-        }
-        catch (Exception $error)
-        {
-            $message = 'An exception has occurred. class: '.get_class($error).';msg: '.$error->getMessage().';code: '.$error->getCode().';line: '.$error->getLine().';in_file: '.$error->getFile().';';
-            error_log($message);
-            echo wp_json_encode(array('result'=>'failed','error'=>$message));
-        }
-        die();
-    }
-
     public static function get_custom_path_size($type, $path, $size=0){
         if(!function_exists('get_home_path'))
             require_once(ABSPATH . 'wp-admin/includes/file.php');
@@ -412,61 +350,6 @@ class WPvivid_Staging_Free
         return $size;
     }
 
-    public function get_custom_files_size(){
-        global $wpvivid_plugin;
-        check_ajax_referer( 'wpvivid_ajax', 'nonce' );
-        $check=current_user_can('manage_options');
-        $check=apply_filters('wpvivid_ajax_check_security',$check);
-        if(!$check)
-        {
-            die();
-        }
-        try
-        {
-            $upload_dir = wp_upload_dir();
-            $path = $upload_dir['basedir'];
-            $path = str_replace('\\','/',$path);
-            $uploads_path = $path.'/';
-
-            $content_dir = WP_CONTENT_DIR;
-            $path = str_replace('\\','/',$content_dir);
-            $content_path = $path.'/';
-
-            if(!function_exists('get_home_path'))
-                require_once(ABSPATH . 'wp-admin/includes/file.php');
-            $home_path = str_replace('\\','/', get_home_path());
-
-            $themes_path = str_replace('\\','/', get_theme_root());
-            $themes_path = $themes_path.'/';
-
-            $plugins_path = str_replace('\\','/', WP_PLUGIN_DIR);
-            $plugins_path = $plugins_path.'/';
-
-            $ret['result']='success';
-            $core_size = self::get_custom_path_size('core', $home_path);
-            $themes_size = self::get_custom_path_size('themes', $themes_path);
-            $plugins_size = self::get_custom_path_size('plugins', $plugins_path);
-            $uploads_size = self::get_custom_path_size('uploads', $uploads_path);
-            $content_size = self::get_custom_path_size('content', $content_path);
-            $additional_size = self::get_custom_path_size('additional', $home_path);
-            $ret['core_size'] = size_format($core_size, 2);
-            $ret['themes_size'] = size_format($themes_size, 2);
-            $ret['plugins_size'] = size_format($plugins_size, 2);
-            $ret['uploads_size'] = size_format($uploads_size, 2);
-            $ret['content_size'] = size_format($content_size, 2);
-            $ret['additional_size'] = size_format($additional_size, 2);
-            $ret['total_file_size'] = size_format($core_size+$themes_size+$plugins_size+$uploads_size+$content_size+$additional_size, 2);
-            echo wp_json_encode($ret);
-        }
-        catch (Exception $error)
-        {
-            $message = 'An exception has occurred. class: '.get_class($error).';msg: '.$error->getMessage().';code: '.$error->getCode().';line: '.$error->getLine().';in_file: '.$error->getFile().';';
-            error_log($message);
-            echo wp_json_encode(array('result'=>'failed','error'=>$message));
-        }
-        die();
-    }
-
     public function get_staging_site_data()
     {
         if(is_multisite())
@@ -481,316 +364,6 @@ class WPvivid_Staging_Free
         }
 
         return $staging;
-    }
-
-    public function get_custom_database_tables_info()
-    {
-        global $wpvivid_plugin;
-        check_ajax_referer( 'wpvivid_ajax', 'nonce' );
-        $check=current_user_can('manage_options');
-        $check=apply_filters('wpvivid_ajax_check_security',$check);
-        if(!$check)
-        {
-            die();
-        }
-        try {
-            global $wpdb;
-            $db = array();
-            $use_additional_db = false;
-            $staging_site_id = sanitize_key($_POST['id']);
-            if(empty($_POST['id']))
-            {
-                $get_site_mu_single=false;
-            }
-            else
-            {
-                $task = new WPvivid_Staging_Task($staging_site_id);
-                $site_id=$task->get_site_mu_single_site_id();
-                $get_site_mu_single=$task->get_site_mu_single();
-            }
-
-
-            if (isset($_POST['is_staging']) && !empty($_POST['is_staging']) && is_string($_POST['is_staging'])&&$_POST['is_staging'] == '1')
-            {
-                $base_prefix = $task->get_site_prefix();
-            }
-            else
-            {
-                $base_prefix=$wpdb->base_prefix;
-            }
-
-            if (isset($_POST['is_staging']) && !empty($_POST['is_staging']) && is_string($_POST['is_staging']))
-            {
-                if ($_POST['is_staging'] == '1')
-                {
-                    $is_staging_site = true;
-
-                    $prefix = $task->get_site_prefix();
-
-                    $db = $task->get_site_db_connect();
-                    if ($db['use_additional_db'] !== false)
-                    {
-                        $use_additional_db = true;
-                    } else {
-                        $use_additional_db = false;
-                    }
-                } else {
-                    $is_staging_site = false;
-                    $prefix = $wpdb->get_blog_prefix(0);
-                }
-            } else {
-                $is_staging_site = false;
-                $prefix = $wpdb->get_blog_prefix(0);
-            }
-
-            $ret['result'] = 'success';
-            $ret['html'] = '';
-            if (empty($prefix)) {
-                echo wp_json_encode($ret);
-                die();
-            }
-
-            $base_table = '';
-            $woo_table = '';
-            $other_table = '';
-            $default_table = array($prefix . 'commentmeta', $prefix . 'comments', $prefix . 'links', $prefix . 'options', $prefix . 'postmeta', $prefix . 'posts', $prefix . 'term_relationships',
-                $prefix . 'term_taxonomy', $prefix . 'termmeta', $prefix . 'terms', $prefix . 'usermeta', $prefix . 'users');
-            $woo_table_arr = array($prefix.'actionscheduler_actions', $prefix.'actionscheduler_claims', $prefix.'actionscheduler_groups', $prefix.'actionscheduler_logs', $prefix.'aelia_dismissed_messages',
-                $prefix.'aelia_exchange_rates_history', $prefix.'automatewoo_abandoned_carts', $prefix.'automatewoo_customer_meta', $prefix.'automatewoo_customers', $prefix.'automatewoo_events',
-                $prefix.'automatewoo_guest_meta', $prefix.'automatewoo_guests', $prefix.'automatewoo_log_meta', $prefix.'automatewoo_logs', $prefix.'automatewoo_queue', $prefix.'automatewoo_queue_meta',
-                $prefix.'automatewoo_unsubscribes', $prefix.'wc_admin_note_actions', $prefix.'wc_admin_notes', $prefix.'wc_am_api_activation', $prefix.'wc_am_api_resource', $prefix.'wc_am_associated_api_key',
-                $prefix.'wc_am_secure_hash', $prefix.'wc_category_lookup', $prefix.'wc_customer_lookup', $prefix.'wc_download_log', $prefix.'wc_order_coupon_lookup', $prefix.'wc_order_product_lookup',
-                $prefix.'wc_order_stats', $prefix.'wc_order_tax_lookup', $prefix.'wc_product_meta_lookup', $prefix.'wc_reserved_stock', $prefix.'wc_tax_rate_classes', $prefix.'wc_webhooks',
-                $prefix.'woocommerce_api_keys', $prefix.'woocommerce_attribute_taxonomies', $prefix.'woocommerce_downloadable_product_permissions', $prefix.'woocommerce_log', $prefix.'woocommerce_order_itemmeta',
-                $prefix.'woocommerce_order_items', $prefix.'woocommerce_payment_tokenmeta', $prefix.'woocommerce_payment_tokens', $prefix.'woocommerce_sessions', $prefix.'woocommerce_shipping_zone_locations',
-                $prefix.'woocommerce_shipping_zone_methods', $prefix.'woocommerce_shipping_zones', $prefix.'woocommerce_tax_rate_locations', $prefix.'woocommerce_tax_rates');
-
-            if ($is_staging_site) {
-                $staging_option = self::wpvivid_get_push_staging_history();
-                if (empty($staging_option)) {
-                    $staging_option = array();
-                }
-                if ($use_additional_db) {
-                    $handle = new wpdb($db['dbuser'], $db['dbpassword'], $db['dbname'], $db['dbhost']);
-                    $tables = $handle->get_results('SHOW TABLE STATUS', ARRAY_A);
-                } else {
-                    $tables = $wpdb->get_results('SHOW TABLE STATUS', ARRAY_A);
-                }
-            } else {
-                $staging_option = self::wpvivid_get_staging_history();
-                if (empty($staging_option)) {
-                    $staging_option = array();
-                }
-                $tables = $wpdb->get_results('SHOW TABLE STATUS', ARRAY_A);
-            }
-
-            if (is_null($tables)) {
-                $ret['result'] = 'failed';
-                $ret['error'] = 'Failed to retrieve the table information for the database. Please try again.';
-                echo wp_json_encode($ret);
-                die();
-            }
-
-            $tables_info = array();
-            $has_base_table = false;
-            $has_woo_table = false;
-            $has_other_table = false;
-            $base_count = 0;
-            $woo_count = 0;
-            $other_count = 0;
-            $base_table_all_check = true;
-            $woo_table_all_check = true;
-            $other_table_all_check = true;
-            foreach ($tables as $row)
-            {
-                if (preg_match('/^(?!' . $base_prefix . ')/', $row["Name"]) == 1)
-                {
-                    continue;
-                }
-
-                if($get_site_mu_single)
-                {
-                    $site_id=$task->get_site_mu_single_site_id();
-
-                    if(!is_main_site($site_id))
-                    {
-                        if ( 1 == preg_match('/^' . $prefix . '/', $row["Name"]) )
-                        {
-                        }
-                        else if ( 1 == preg_match('/^' . $base_prefix . '\d+_/', $row["Name"]) )
-                        {
-                            continue;
-                        }
-                        else
-                        {
-                            if($row["Name"]==$base_prefix.'users'||$row["Name"]==$base_prefix.'usermeta')
-                            {
-
-                            }
-                            else
-                            {
-                                continue;
-                            }
-                        }
-                    }
-                    else
-                    {
-                        if ( 1 == preg_match('/^' . $base_prefix . '\d+_/', $row["Name"]) )
-                        {
-                            continue;
-                        }
-                        else
-                        {
-                            if($row["Name"]==$base_prefix.'blogs')
-                                continue;
-                            if($row["Name"]==$base_prefix.'blogmeta')
-                                continue;
-                            if($row["Name"]==$base_prefix.'sitemeta')
-                                continue;
-                            if($row["Name"]==$base_prefix.'site')
-                                continue;
-                        }
-                    }
-                }
-
-
-                $tables_info[$row["Name"]]["Rows"] = $row["Rows"];
-                $tables_info[$row["Name"]]["Data_length"] = size_format($row["Data_length"] + $row["Index_length"], 2);
-
-                $checked = 'checked';
-                if (!empty($staging_option['database_list'])) {
-                    if ($is_staging_site) {
-                        $tmp_row = $row["Name"];
-
-                        $tmp_row = str_replace($base_prefix, $wpdb->base_prefix, $tmp_row);
-                        if (in_array($tmp_row, $staging_option['database_list'])) {
-                            $checked = '';
-                        }
-                    }
-                    else if (in_array($row["Name"], $staging_option['database_list'])) {
-                        $checked = '';
-                    }
-                }
-
-                if (in_array($row["Name"], $default_table)) {
-                    if ($checked == '') {
-                        $base_table_all_check = false;
-                    }
-                    $has_base_table = true;
-
-                    $base_table .= '<div class="wpvivid-text-line">
-                                        <input type="checkbox" option="base_db" name="Database" value="'.esc_html($row["Name"]).'" '.esc_html($checked).' />
-                                        <span class="wpvivid-text-line">'.esc_html($row["Name"]).'|Rows:'.$row["Rows"].'|Size:'.$tables_info[$row["Name"]]["Data_length"].'</span>
-                                    </div>';
-                    $base_count++;
-                } else if(in_array($row['Name'], $woo_table_arr)){
-                    if ($checked == '') {
-                        $woo_table_all_check = false;
-                    }
-                    $has_woo_table = true;
-
-                    $woo_table .= '<div class="wpvivid-text-line">
-                                        <input type="checkbox" option="woo_db" name="Database" value="'.esc_html($row["Name"]).'" '.esc_html($checked).' />
-                                        <span class="wpvivid-text-line">'.esc_html($row["Name"]).'|Rows:'.$row["Rows"].'|Size:'.$tables_info[$row["Name"]]["Data_length"].'</span>
-                                   </div>';
-                    $woo_count++;
-                }
-                else {
-                    if ($checked == '') {
-                        $other_table_all_check = false;
-                    }
-                    $has_other_table = true;
-
-                    $other_table .= '<div class="wpvivid-text-line">
-                                        <input type="checkbox" option="other_db" name="Database" value="'.esc_html($row["Name"]).'" '.esc_html($checked).' />
-                                        <span class="wpvivid-text-line">'.esc_html($row["Name"]).'|Rows:'.$row["Rows"].'|Size:'.$tables_info[$row["Name"]]["Data_length"].'</span>
-                                     </div>';
-                    $other_count++;
-                }
-            }
-
-            $ret['html'] = '<div style="padding-left:4em;margin-top:1em;">
-                                        <div style="border-bottom:1px solid #eee;"></div>
-                                     </div>';
-
-            $base_table_html = '';
-            $woo_table_html = '';
-            $other_table_html = '';
-            if ($has_base_table) {
-                $base_all_check = '';
-                if ($base_table_all_check) {
-                    $base_all_check = 'checked';
-                }
-                $base_table_html .= '<div style="width:30%;float:left;box-sizing:border-box;padding-right:0.5em;padding-left:4em;">
-                                        <div>
-                                            <p>
-                                                <span class="dashicons dashicons-list-view wpvivid-dashicons-blue"></span>
-                                                <span><input type="checkbox" class="wpvivid-database-table-check wpvivid-database-base-table-check" '.esc_attr($base_all_check).'></span>
-                                                <span><strong>Wordpress Default Tables</strong></span>
-                                            </p>
-                                        </div>
-                                        <div style="height:250px;border:1px solid #eee;padding:0.2em 0.5em;overflow:auto;">
-                                            '.$base_table.'
-                                        </div>
-                                        <div style="clear:both;"></div>
-                                    </div>';
-            }
-
-            if ($has_other_table) {
-                $other_all_check = '';
-                if ($other_table_all_check) {
-                    $other_all_check = 'checked';
-                }
-
-                if($has_woo_table){
-                    $other_table_width = '40%';
-                }
-                else{
-                    $other_table_width = '70%';
-                }
-
-                $other_table_html .= '<div style="width:'.$other_table_width.'; float:left;box-sizing:border-box;padding-left:0.5em;">
-                                        <div>
-                                            <p>
-                                                <span class="dashicons dashicons-list-view wpvivid-dashicons-green"></span>
-                                                <span><input type="checkbox" class="wpvivid-database-table-check wpvivid-database-other-table-check" '.esc_attr($other_all_check).'></span>
-                                                <span><strong>Other Tables</strong></span>
-                                            </p>
-                                        </div>
-                                        <div style="height:250px;border:1px solid #eee;padding:0.2em 0.5em;overflow-y:auto;">
-                                            '.$other_table.'
-                                        </div>
-                                     </div>';
-            }
-
-            if($has_woo_table) {
-                $woo_all_check = '';
-                if ($woo_table_all_check) {
-                    $woo_all_check = 'checked';
-                }
-                $woo_table_html .= '<div style="width:30%; float:left;box-sizing:border-box;padding-left:0.5em;">
-                                        <div>
-										    <p><span class="dashicons dashicons-list-view wpvivid-dashicons-orange"></span>
-												<span><input type="checkbox" class="wpvivid-database-table-check wpvivid-database-woo-table-check" '.esc_attr($woo_all_check).'></span>
-												<span><strong>WooCommerce Tables</strong></span>
-											</p>
-										</div>
-										<div style="height:250px;border:1px solid #eee;padding:0.2em 0.5em;overflow:auto;">
-											'.$woo_table.'
-                                        </div>
-                                    </div>';
-            }
-
-            $ret['html'] .= $base_table_html . $other_table_html . $woo_table_html;
-            $ret['tables_info'] = $tables_info;
-            echo wp_json_encode($ret);
-        }
-        catch (Exception $error) {
-            $message = 'An exception has occurred. class: '.get_class($error).';msg: '.$error->getMessage().';code: '.$error->getCode().';line: '.$error->getLine().';in_file: '.$error->getFile().';';
-            error_log($message);
-            echo wp_json_encode(array('result'=>'failed','error'=>$message));
-        }
-        die();
     }
 
     public function wpvivid_replace_directory( $path ) {
@@ -1213,47 +786,6 @@ class WPvivid_Staging_Free
         die();
     }
 
-    public function delete_site()
-    {
-        global $wpvivid_plugin;
-        check_ajax_referer( 'wpvivid_ajax', 'nonce' );
-        $check=current_user_can('manage_options');
-        $check=apply_filters('wpvivid_ajax_check_security',$check);
-        if(!$check)
-        {
-            die();
-        }
-        try {
-            if (isset($_POST['id'])) {
-                $id = sanitize_key($_POST['id']);
-            } else {
-                die();
-            }
-
-            $ret = $this->_delete_site($id);
-
-            $html = '';
-            $list = get_option('wpvivid_staging_task_list', array());
-            if (!empty($list)) {
-                $display_list = new WPvivid_Staging_List();
-                $display_list->set_parent('wpvivid_staging_list');
-                $display_list->set_list($list);
-                $display_list->prepare_items();
-                ob_start();
-                $display_list->display();
-                $html = ob_get_clean();
-            }
-            $ret['html'] = $html;
-            echo wp_json_encode($ret);
-        }
-        catch (Exception $error) {
-            $message = 'An exception has occurred. class: '.get_class($error).';msg: '.$error->getMessage().';code: '.$error->getCode().';line: '.$error->getLine().';in_file: '.$error->getFile().';';
-            error_log($message);
-            echo wp_json_encode(array('result'=>'failed','error'=>$message));
-        }
-        die();
-    }
-
     public function wpvivid_get_staging_database_object($use_additional_db, $db_user, $db_pass, $db_name, $db_host){
         if($use_additional_db){
             return new wpdb($db_user, $db_pass, $db_name, $db_host);
@@ -1264,494 +796,135 @@ class WPvivid_Staging_Free
         }
     }
 
-    private function wpvivid_normalize_delete_path($path, $use_realpath = true)
+    /** Delete only server-registered staging resources; keep the task on any failure. */
+    public function _delete_site($site_id, $unfinished = false, $cancel_only = false)
     {
-        if (empty($path) || !is_string($path)) {
-            return false;
-        }
-
-        $path = wp_normalize_path($path);
-        $path = untrailingslashit($path);
-        if ($use_realpath) {
-            $real_path = realpath($path);
-            if ($real_path !== false) {
-                $path = wp_normalize_path($real_path);
-                $path = untrailingslashit($path);
-            }
-        }
-
-        if ((defined('PHP_OS_FAMILY') && PHP_OS_FAMILY === 'Windows') || DIRECTORY_SEPARATOR === '\\') {
-            $path = strtolower($path);
-        }
-
-        return $path;
-    }
-
-    private function wpvivid_get_cancel_staging_cleanup($site_path)
-    {
-        $normalized_path = $this->wpvivid_normalize_delete_path($site_path, false);
-        if ($normalized_path === false) {
-            return false;
-        }
-
-        $cleanup = get_transient('wpvivid_cancel_staging_cleanup_' . md5($normalized_path));
-        if (!is_array($cleanup) || empty($cleanup['staging_path'])) {
-            return false;
-        }
-
-        $cleanup_path = $this->wpvivid_normalize_delete_path($cleanup['staging_path'], false);
-        $delete_path = $this->wpvivid_normalize_delete_path($site_path, false);
-        if ($cleanup_path === false || $delete_path === false || $cleanup_path !== $delete_path) {
-            return false;
-        }
-
-        return $cleanup;
-    }
-
-    private function wpvivid_is_allowed_staging_delete_path($site_path)
-    {
-        if (empty($site_path) || !is_string($site_path)) {
-            return false;
-        }
-
-        if (!file_exists($site_path) || !is_dir($site_path)) {
-            return false;
-        }
-
-        $real_site_path = $this->wpvivid_normalize_delete_path($site_path, true);
-        if ($real_site_path === false) {
-            return false;
-        }
-
-        $real_site_path = wp_normalize_path(untrailingslashit($real_site_path));
-
-        $protected_paths = array(
-            ABSPATH,
-            WP_CONTENT_DIR,
-            WP_PLUGIN_DIR,
-            get_theme_root(),
-            ABSPATH . 'wp-admin',
-            ABSPATH . 'wp-includes'
-        );
-
-        $upload_dir = wp_get_upload_dir();
-        if (!empty($upload_dir['basedir'])) {
-            $protected_paths[] = $upload_dir['basedir'];
-        }
-
-        foreach ($protected_paths as $protected_path) {
-            $real_protected_path = $this->wpvivid_normalize_delete_path($protected_path, true);
-            if ($real_protected_path === false) {
-                continue;
-            }
-
-            if ($real_site_path === $real_protected_path) {
-                return false;
-            }
-
-            if (strpos($real_protected_path . '/', $real_site_path . '/') === 0) {
-                return false;
-            }
-        }
-
-        $tasks = get_option('wpvivid_staging_task_list', array());
-        if (is_array($tasks)) {
-            foreach ($tasks as $task) {
-                $allowed_paths = array();
-
-                if (!empty($task['path']['des_path'])) {
-                    $allowed_paths[] = $task['path']['des_path'];
-                }
-
-                if (!empty($task['site']['path'])) {
-                    $allowed_paths[] = $task['site']['path'];
-                }
-
-                foreach ($allowed_paths as $allowed_path) {
-                    $real_allowed_path = $this->wpvivid_normalize_delete_path($allowed_path, true);
-                    if ($real_allowed_path !== false && $real_site_path === $real_allowed_path) {
-                        return true;
-                    }
-                }
-            }
-        }
-
-        $cleanup = $this->wpvivid_get_cancel_staging_cleanup($site_path);
-        if ($cleanup !== false) {
-            return true;
-        }
-
-        return false;
-    }
-
-    public function delete_cancel_staging_site(){
-        global $wpvivid_plugin;
-        check_ajax_referer( 'wpvivid_ajax', 'nonce' );
-        $check=current_user_can('manage_options');
-        $check=apply_filters('wpvivid_ajax_check_security',$check);
-        if(!$check)
-        {
-            die();
-        }
-        try {
-            if (isset($_POST['staging_site_info'])) {
-                $json = sanitize_text_field($_POST['staging_site_info']);
-                $json = stripslashes($json);
-                $staging_site_info = json_decode($json, true);
-                $site_path = $staging_site_info['staging_path'];
-                $use_additional_db = $staging_site_info['staging_additional_db'];
-                $db_user = $staging_site_info['staging_additional_db_user'];
-                $db_pass = $staging_site_info['staging_additional_db_pass'];
-                $db_name = $staging_site_info['staging_additional_db_name'];
-                $db_host = $staging_site_info['staging_additional_db_host'];
-                if (!empty($site_path)) {
-                    if (file_exists($site_path)) {
-                        if (!$this->wpvivid_is_allowed_staging_delete_path($site_path)) {
-                            echo wp_json_encode(array(
-                                'result' => 'failed',
-                                'error'  => 'Invalid staging path.'
-                            ));
-                            die();
-                        }
-
-                        $home_path = untrailingslashit(ABSPATH);
-                        if ($home_path != $site_path) {
-
-                            if (!class_exists('WP_Filesystem_Base')) include_once(ABSPATH . '/wp-admin/includes/class-wp-filesystem-base.php');
-                            if (!class_exists('WP_Filesystem_Direct')) include_once(ABSPATH . '/wp-admin/includes/class-wp-filesystem-direct.php');
-
-                            $fs = new WP_Filesystem_Direct(false);
-                            $fs->rmdir($site_path, true);
-                        }
-                    }
-                }
-
-                $prefix = $staging_site_info['staging_table_prefix'];
-                if (!empty($prefix)) {
-                    $db = $this->wpvivid_get_staging_database_object($use_additional_db, $db_user, $db_pass, $db_name, $db_host);
-                    $sql = $db->prepare("SHOW TABLES LIKE %s;", $db->esc_like($prefix) . '%');
-                    $result = $db->get_results($sql, OBJECT_K);
-
-                    if (!empty($result)) {
-                        foreach ($result as $table_name => $value) {
-                            $table['name'] = $table_name;
-                            $db->query("DROP TABLE IF EXISTS {$table_name}");
-                        }
-                    }
-                }
-
-                $normalized_path = $this->wpvivid_normalize_delete_path($site_path, false);
-                if ($normalized_path !== false) {
-                    delete_transient('wpvivid_cancel_staging_cleanup_' . md5($normalized_path));
-                }
-
-                $ret['result'] = 'success';
-                echo wp_json_encode($ret);
-            }
-        }
-        catch (Exception $error) {
-            $message = 'An exception has occurred. class: '.get_class($error).';msg: '.$error->getMessage().';code: '.$error->getCode().';line: '.$error->getLine().';in_file: '.$error->getFile().';';
-            error_log($message);
-            echo wp_json_encode(array('result'=>'failed','error'=>$message));
-        }
-        die();
-    }
-
-    public function _delete_site($site_id,$unfinished=false)
-    {
+        $lock = false;
         try
         {
-            set_time_limit(900);
-            $task=new WPvivid_Staging_Task($site_id);
-
-            if($unfinished)
+            $task = $this->get_staging_task($site_id);
+            $lock = $this->acquire_staging_lock($site_id);
+            if ($lock === false) throw new Exception('The staging task is still running. Please retry cleanup.');
+            $task->get_task();
+            if ($cancel_only && $task->task['status']['str'] !== 'cancel')
+                throw new Exception('Only a cancelled staging task can be cleaned by this endpoint.');
+            if (in_array($task->task['status']['str'], array('ready', 'running'), true))
+                throw new Exception('The staging task must stop before it can be deleted.');
+            if ($unfinished && ($task->is_restore() || $task->is_copy()))
             {
-                if($task->is_restore()||$task->is_copy())
-                {
-                    $ret['result']='success';
-                    return $ret;
-                }
-                $site_path=$task->get_path(true);
-                $prefix=$task->get_db_prefix(true);
-                $copy_db=new WPvivid_Staging_Copy_DB($site_id);
-                $db=$copy_db->get_db_instance(true);
+                if ($cancel_only) throw new Exception('This is not a cancelled new staging task.');
+                return array('result' => 'success');
+            }
+            if ($unfinished)
+            {
+                $path = isset($task->task['path']['des_path']) ? $task->task['path']['des_path'] : '';
+                $connection = isset($task->task['db_connect']) ? $task->task['db_connect'] : array();
             }
             else
             {
-                $site_path=$task->get_site_path();
-                $prefix=$task->get_site_prefix();
-                $db=$task->get_site_db_instance();
-            }
-
-            if(empty($site_path))
-            {
-                $ret['result']='success';
-                $default = array();
-                $tasks = get_option('wpvivid_staging_task_list', $default);
-                unset($tasks[$site_id]);
-                update_option('wpvivid_staging_task_list',$tasks,'no');
-                return $ret;
-            }
-
-            $home_path=untrailingslashit(ABSPATH);
-            if($home_path!=$site_path)
-            {
-                if (file_exists($site_path))
+                if (empty($task->task['site']['path']) || empty($task->task['site']['prefix']))
+                    throw new Exception('The registered staging site information is missing.');
+                $path = $task->task['site']['path'];
+                $site_db = $task->task['site']['db_connect'];
+                $connection = array('new_prefix' => $task->task['site']['prefix'],
+                    'des_use_additional_db' => !empty($site_db['use_additional_db']));
+                if ($connection['des_use_additional_db'])
                 {
-                    if (!class_exists('WP_Filesystem_Base')) include_once(ABSPATH . '/wp-admin/includes/class-wp-filesystem-base.php');
-                    if (!class_exists('WP_Filesystem_Direct')) include_once(ABSPATH . '/wp-admin/includes/class-wp-filesystem-direct.php');
-
-                    $fs = new WP_Filesystem_Direct(false);
-                    $fs->rmdir($site_path, true);
+                    foreach (array('dbhost', 'dbname', 'dbuser', 'dbpassword') as $key)
+                        $connection['des_' . $key] = $site_db[$key];
                 }
             }
-
-            if(empty($prefix)||empty($db))
+            $path = $this->validate_staging_target_path($path);
+            $prefix = $this->validate_staging_prefix(isset($connection['new_prefix']) ? $connection['new_prefix'] : '');
+            $db = $this->staging_database($connection);
+            $all_tables = $this->staging_database_tables($db);
+            $candidates = array();
+            foreach ($all_tables as $name)
             {
-                $ret['result']='success';
-                $default = array();
-                $tasks = get_option('wpvivid_staging_task_list', $default);
-                unset($tasks[$site_id]);
-                update_option('wpvivid_staging_task_list',$tasks,'no');
-                return $ret;
+                if (strpos($name, $prefix) === 0) $candidates[] = $name;
             }
-
-            $sql=$db->prepare("SHOW TABLES LIKE %s;", $db->esc_like($prefix) . '%');
-            $result = $db->get_results($sql, OBJECT_K);
-            if(!empty($result))
+            if (!empty($task->task['cleanup']))
             {
-                $db->query( "SET foreign_key_checks = 0" );
-                foreach ($result as $table_name=>$value)
+                $scope = $task->task['cleanup'];
+                if ($scope['path'] !== $this->normalize_staging_path($path) ||
+                    $scope['prefix'] !== $prefix ||
+                    $scope['connection_hash'] !== $this->staging_connection_hash($connection))
+                    throw new Exception('The staging cleanup destination does not match the task.');
+                foreach ($candidates as $name)
                 {
-                    $table['name']=$table_name;
-                    $db->query( "DROP TABLE IF EXISTS {$table_name}" );
+                    if (in_array($name, $scope['preexisting_tables'], true))
+                        throw new Exception('Cleanup would affect a pre-existing database table.');
                 }
-                $db->query( "SET foreign_key_checks = 1" );
-            }
-
-            $default = array();
-            $tasks = get_option('wpvivid_staging_task_list', $default);
-            unset($tasks[$site_id]);
-            update_option('wpvivid_staging_task_list',$tasks,'no');
-
-            $ret['result']='success';
-        }
-        catch (Exception $error)
-        {
-            $ret['result']='failed';
-            $ret['error']=$error->getMessage();
-        }
-
-        return $ret;
-    }
-
-    public function check_staging_dir()
-    {
-        global $wpvivid_plugin;
-        check_ajax_referer( 'wpvivid_ajax', 'nonce' );
-        $check=current_user_can('manage_options');
-        $check=apply_filters('wpvivid_ajax_check_security',$check);
-        if(!$check)
-        {
-            die();
-        }
-        try
-        {
-            $ret['result'] = 'success';
-            if(!isset($_POST['path']) || empty($_POST['path']) || !is_string($_POST['path']))
-            {
-                $ret['result']='failed';
-                $ret['error']='A site path is required.';
-                echo wp_json_encode($ret);
-                die();
-            }
-
-            $path = sanitize_text_field($_POST['path']);
-            $path = sanitize_file_name($path);
-
-            if(!isset($_POST['table_prefix']) || empty($_POST['table_prefix']) || !is_string($_POST['table_prefix']))
-            {
-                $ret['result']='failed';
-                $ret['error']='A table prefix is required.';
-                echo wp_json_encode($ret);
-                die();
-            }
-
-            $table_prefix = sanitize_text_field($_POST['table_prefix']);
-
-            if (isset($_POST['root_dir']) && $_POST['root_dir'] == 0)
-            {
-                $path = untrailingslashit(ABSPATH) . DIRECTORY_SEPARATOR. $path;
-            }
-            else if(isset($_POST['root_dir']) && $_POST['root_dir'] == 1)
-            {
-                $path = WP_CONTENT_DIR . DIRECTORY_SEPARATOR . $path;
-            }
-            else
-            {
-                $ret['result'] = 'failed';
-                $ret['error'] = 'We are not able to authenticate the staging directory, please contact us.';
-                echo wp_json_encode($ret);
-                die();
-            }
-
-            if (file_exists($path))
-            {
-                $ret['result'] = 'failed';
-                $ret['error'] = 'A folder with the same name already exists in website\'s root directory.';
-            }
-            else
-            {
-                if (mkdir($path, 0755, true))
+                if ($unfinished)
                 {
-                    $test_file_name = 'wpvividstg_test_file.txt';
-                    $test_file_path = $path.DIRECTORY_SEPARATOR.$test_file_name;
-                    $mk_res = fopen($test_file_path, 'wb');
-                    if (!$mk_res)
+                    // Files may be absent, but cancellation is still bound to the task table manifest.
+                    foreach ($candidates as $name)
                     {
-                        if(file_exists($path))
-                            @rmdir($path);
-                        $ret['result']='failed';
-                        $ret['error']='The directory where the staging site will be installed is not writable. Please set the permissions of the directory to 755 then try it again.';
-                        echo wp_json_encode($ret);
-                        die();
-                    }
-                    fclose($mk_res);
-                    @wp_delete_file($test_file_path);
-                    @rmdir($path);
-                } else {
-                    $ret['result'] = 'failed';
-                    $ret['error'] = 'Create directory is not allowed in ' . $path . '.Please check the directory permissions and try again';
-                }
-            }
-
-            if(isset($_POST['additional_db']))
-            {
-                $additional_db_json = sanitize_text_field($_POST['additional_db']);
-                $additional_db_json = stripslashes($additional_db_json);
-                $additional_db_options = json_decode($additional_db_json, true);
-                if($additional_db_options['additional_database_check'] === '1')
-                {
-                    $db_user = sanitize_text_field($additional_db_options['additional_database_info']['db_user']);
-                    $db_pass = sanitize_text_field($additional_db_options['additional_database_info']['db_pass']);
-                    $db_host = sanitize_text_field($additional_db_options['additional_database_info']['db_host']);
-                    $db_name = sanitize_text_field($additional_db_options['additional_database_info']['db_name']);
-                    $db = new wpdb($db_user, $db_pass, $db_name, $db_host);
-                    $sql = $db->prepare("SHOW TABLES LIKE %s;", $db->esc_like($table_prefix) . '%');
-                    $result = $db->get_results($sql, OBJECT_K);
-                    if (!empty($result))
-                    {
-                        $ret['result'] = 'failed';
-                        $ret['error'] = 'The table prefix already exists.';
-                    }
-                }
-                else
-                {
-                    global $wpdb;
-                    $sql = $wpdb->prepare("SHOW TABLES LIKE %s;", $wpdb->esc_like($table_prefix) . '%');
-                    $result = $wpdb->get_results($sql, OBJECT_K);
-                    if (!empty($result))
-                    {
-                        $ret['result'] = 'failed';
-                        $ret['error'] = 'The table prefix already exists.';
+                        if (!in_array($name, $scope['tables'], true))
+                            throw new Exception('A database table is not registered to this staging task.');
                     }
                 }
             }
             else
             {
+                if ($unfinished)
+                    throw new Exception('This older task has no verified cleanup information. Automatic cleanup was refused.');
+                // Preserve deletion of older completed sites only when their prefix is clearly separate.
                 global $wpdb;
-                $sql = $wpdb->prepare("SHOW TABLES LIKE %s;", $wpdb->esc_like($table_prefix) . '%');
-                $result = $wpdb->get_results($sql, OBJECT_K);
-                if (!empty($result))
+                foreach (array($wpdb->prefix, $wpdb->base_prefix) as $live_prefix)
                 {
-                    $ret['result'] = 'failed';
-                    $ret['error'] = 'The table prefix already exists.';
+                    if (strpos($prefix, $live_prefix) === 0 || strpos($live_prefix, $prefix) === 0)
+                        throw new Exception('The staging table prefix overlaps the live site.');
+                }
+                $live_tables = $wpdb->tables('all', true);
+                if (array_intersect($candidates, array_values($live_tables)))
+                    throw new Exception('Cleanup would affect a live database table.');
+            }
+
+            // All path, connection and table checks above complete before the first deletion.
+            if (!empty($candidates))
+            {
+                if ($db->query('SET foreign_key_checks = 0') === false)
+                    throw new Exception('Failed to prepare staging database cleanup.');
+                try
+                {
+                    foreach ($candidates as $name)
+                    {
+                        $identifier = '`' . str_replace('`', '``', $name) . '`';
+                        if ($db->query('DROP TABLE IF EXISTS ' . $identifier) === false)
+                            throw new Exception('Failed to delete a staging database table.');
+                    }
+                }
+                finally
+                {
+                    $db->query('SET foreign_key_checks = 1');
                 }
             }
-            echo wp_json_encode($ret);
+            if (is_dir($path))
+            {
+                if (!class_exists('WP_Filesystem_Base')) include_once ABSPATH . 'wp-admin/includes/class-wp-filesystem-base.php';
+                if (!class_exists('WP_Filesystem_Direct')) include_once ABSPATH . 'wp-admin/includes/class-wp-filesystem-direct.php';
+                $fs = new WP_Filesystem_Direct(false);
+                if (!$fs->rmdir($path, true)) throw new Exception('Failed to delete the staging directory.');
+            }
+            $tasks = get_option('wpvivid_staging_task_list', array());
+            unset($tasks[$site_id]);
+            update_option('wpvivid_staging_task_list', $tasks, 'no');
+            if (get_option('wpvivid_current_running_staging_task', '') === $site_id)
+            {
+                update_option('wpvivid_current_running_staging_task', '', 'no');
+                update_option('wpvivid_staging_task_cancel', false, 'no');
+            }
+            return array('result' => 'success');
         }
         catch (Exception $error)
         {
-            $message = 'An exception has occurred. class: '.get_class($error).';msg: '.$error->getMessage().';code: '.$error->getCode().';line: '.$error->getLine().';in_file: '.$error->getFile().';';
-            error_log($message);
-            echo wp_json_encode(array('result'=>'failed','error'=>$message));
+            return array('result' => 'failed', 'error' => $error->getMessage());
         }
-        die();
-    }
-
-    public function check_filesystem_permissions()
-    {
-        global $wpvivid_plugin;
-        check_ajax_referer( 'wpvivid_ajax', 'nonce' );
-        $check=current_user_can('manage_options');
-        $check=apply_filters('wpvivid_ajax_check_security',$check);
-        if(!$check)
+        finally
         {
-            die();
+            $this->release_staging_lock($lock);
         }
-        try{
-            if(!isset($_POST['path']) || empty($_POST['path']) || !is_string($_POST['path']))
-            {
-                $ret['result']='failed';
-                $ret['error']='A site path is required.';
-                echo wp_json_encode($ret);
-                die();
-            }
-
-            $path = sanitize_text_field($_POST['path']);
-            $src_path = untrailingslashit(ABSPATH);
-
-            if(isset($_POST['root_dir'])&&$_POST['root_dir']==0)
-            {
-                $des_path = untrailingslashit(ABSPATH) . '/' . $path;
-            }
-            else if (isset($_POST['root_dir'])&&$_POST['root_dir']==1)
-            {
-                $des_path = WP_CONTENT_DIR . DIRECTORY_SEPARATOR . $path;
-            }
-            else
-            {
-                $test_dir = 'wpvividstg_testfolder';
-                $des_path = untrailingslashit($path) . '/' . $test_dir;
-            }
-
-            $mk_res = mkdir($des_path,0755,true);
-            if (!$mk_res)
-            {
-                $ret['result']='failed';
-                $ret['error']='The directory where the staging site will be installed is not writable. Please set the permissions of the directory to 755 then try it again.';
-                echo wp_json_encode($ret);
-                die();
-            }
-
-            $test_file_name = 'wpvividstg_test_file.txt';
-            $test_file_path = $des_path.DIRECTORY_SEPARATOR.$test_file_name;
-            $mk_res = fopen($test_file_path, 'wb');
-            if (!$mk_res)
-            {
-                if(file_exists($des_path))
-                    @rmdir($des_path);
-                $ret['result']='failed';
-                $ret['error']='The directory where the staging site will be installed is not writable. Please set the permissions of the directory to 755 then try it again.';
-                echo wp_json_encode($ret);
-                die();
-            }
-
-            fclose($mk_res);
-            @wp_delete_file($test_file_path);
-            if(file_exists($des_path))
-                @rmdir($des_path);
-
-            $ret['result'] = 'success';
-            echo wp_json_encode($ret);
-        }
-        catch (Exception $error)
-        {
-            $message = 'An exception has occurred. class: '.get_class($error).';msg: '.$error->getMessage().';code: '.$error->getCode().';line: '.$error->getLine().';in_file: '.$error->getFile().';';
-            error_log($message);
-            echo wp_json_encode(array('result'=>'failed','error'=>$message));
-        }
-        die();
     }
 
     public function get_recent_post()
@@ -1776,379 +949,6 @@ class WPvivid_Staging_Free
         echo '</ul>';
         echo'<input id="wpvivid_update_post" type="button" class="button button-primary" value="Update">';
 
-    }
-
-    public function get_staging_progress()
-    {
-        global $wpvivid_plugin;
-        check_ajax_referer( 'wpvivid_ajax', 'nonce' );
-        $check=current_user_can('manage_options');
-        $check=apply_filters('wpvivid_ajax_check_security',$check);
-        if(!$check)
-        {
-            die();
-        }
-
-        $task_id=get_option('wpvivid_current_running_staging_task','');
-        if(empty($task_id))
-        {
-            $list = get_option('wpvivid_staging_task_list',array());
-            if(!empty($list))
-            {
-                foreach ($list as $key => $value)
-                {
-                    if($value['status']['str'] === 'running' || $value['status']['str'] === 'ready')
-                    {
-                        $task_id = $value['id'];
-                        update_option('wpvivid_current_running_staging_task', $task_id, 'no');
-                        break;
-                    }
-                }
-            }
-            if(empty($task_id))
-            {
-                $ret['result']='success';
-                $ret['log']='';
-                $ret['continue']=0;
-                echo wp_json_encode($ret);
-                die();
-            }
-        }
-
-        try
-        {
-            $task=new WPvivid_Staging_Task($task_id);
-            $b_delete=false;
-            if($task->get_status()=='completed')
-            {
-                if($task->is_restore()){
-                    $ret['completed_msg'] = 'Pushing the staging site to the live site completed successfully.';
-                }
-                else{
-                    $ret['completed_msg'] = 'Updating the staging site completed successfully.';
-
-                    $db_connect = $task->get_db_connect();
-                    $url = $db_connect['new_site_url'];
-                    $options=array();
-                    $options['timeout']=30;
-                    $response = wp_remote_request( $url,$options);
-                    if(!is_wp_error($response) && ($response['response']['code'] == 200))
-                    {
-                        $this->log->OpenLogFile($task->get_log_file_name());
-                        $this->log->WriteLog('Access staging site successfully.', 'notice');
-                    }
-                    else
-                    {
-                        $this->log->OpenLogFile($task->get_log_file_name());
-                        $this->log->WriteLog('Access staging site failed.', 'notice');
-                    }
-                }
-                update_option('wpvivid_current_running_staging_task','','no');
-                $ret['continue']=0;
-                $ret['completed']=1;
-            }
-            else if($task->get_status()=='ready')
-            {
-                $ret['continue']=1;
-                $ret['need_restart']=1;
-            }
-            else if($task->get_status()=='error')
-            {
-                update_option('wpvivid_current_running_staging_task','','no');
-                $ret['continue']=0;
-                $ret['error']=1;
-                $ret['error_msg']=$task->get_error();
-                $b_delete=true;
-            }
-            else if($task->get_status()=='cancel')
-            {
-                update_option('wpvivid_current_running_staging_task','','no');
-                $ret['continue']=0;
-                $ret['need_restart']=0;
-                $ret['is_cancel']=1;
-                foreach ($task as $value){
-                    $ret['staging_path']=$value['path']['des_path'];
-                    if($value['db_connect']['des_use_additional_db']){
-                        $ret['staging_additional_db']=1;
-                        $ret['staging_additional_db_user']=$value['db_connect']['des_dbuser'];
-                        $ret['staging_additional_db_pass']=$value['db_connect']['des_dbpassword'];
-                        $ret['staging_additional_db_host']=$value['db_connect']['des_dbhost'];
-                        $ret['staging_additional_db_name']=$value['db_connect']['des_dbname'];
-                        $ret['staging_table_prefix']=$value['db_connect']['new_prefix'];
-                    }
-                    else{
-                        $ret['staging_additional_db']=0;
-                        $ret['staging_additional_db_user']=null;
-                        $ret['staging_additional_db_pass']=null;
-                        $ret['staging_additional_db_host']=null;
-                        $ret['staging_additional_db_name']=null;
-                        $ret['staging_table_prefix']=$value['db_connect']['new_prefix'];
-                    }
-                }
-
-                if (!empty($ret['staging_path'])) {
-                    $normalized_cleanup_path = $this->wpvivid_normalize_delete_path($ret['staging_path'], false);
-
-                    if ($normalized_cleanup_path !== false) {
-                        set_transient(
-                            'wpvivid_cancel_staging_cleanup_' . md5($normalized_cleanup_path),
-                            array(
-                                'staging_path' => $ret['staging_path'],
-                                'staging_table_prefix' => isset($ret['staging_table_prefix']) ? $ret['staging_table_prefix'] : '',
-                                'staging_additional_db' => isset($ret['staging_additional_db']) ? $ret['staging_additional_db'] : 0,
-                                'staging_additional_db_user' => isset($ret['staging_additional_db_user']) ? $ret['staging_additional_db_user'] : '',
-                                'staging_additional_db_pass' => isset($ret['staging_additional_db_pass']) ? $ret['staging_additional_db_pass'] : '',
-                                'staging_additional_db_name' => isset($ret['staging_additional_db_name']) ? $ret['staging_additional_db_name'] : '',
-                                'staging_additional_db_host' => isset($ret['staging_additional_db_host']) ? $ret['staging_additional_db_host'] : ''
-                            ),
-                            10 * MINUTE_IN_SECONDS
-                        );
-                    }
-                }
-
-                update_option('wpvivid_staging_task_cancel', false, 'no');
-                $b_delete=true;
-            }
-            else
-            {
-                if($task->check_timeout())
-                {
-                    if($task->get_status()=='ready')
-                    {
-                        $ret['continue']=1;
-                        $ret['need_restart']=1;
-                    }
-                    else
-                    {
-                        update_option('wpvivid_current_running_staging_task','','no');
-                        $ret['continue']=0;
-                        $b_delete=true;
-                    }
-                }
-                else
-                {
-                    $ret['continue']=1;
-                    $ret['need_restart']=0;
-                }
-            }
-            $staging_percent = $task->get_progress();
-            $file_name=$this->log->GetSaveLogFolder(). $task->get_log_file_name().'_log.txt';
-            $file =fopen($file_name,'r');
-            $buffer='';
-            if(!$file)
-            {
-                $buffer='open log file failed';
-            }
-            else
-            {
-                if(filesize($file_name)<=1*1024*1024)
-                {
-                    while(!feof($file))
-                    {
-                        $buffer .= fread($file,1024);
-                    }
-                }
-                else
-                {
-                    $pos=-2;
-                    $eof='';
-                    $n=50;
-                    $buffer_array = array();
-                    while($n>0)
-                    {
-                        while($eof!=="\n")
-                        {
-                            if(!fseek($file, $pos, SEEK_END))
-                            {
-                                $eof=fgetc($file);
-                                $pos--;
-                            }
-                            else
-                            {
-                                break;
-                            }
-                        }
-                        $buffer_array[].=fgets($file);
-                        $eof='';
-                        $n--;
-                    }
-
-                    if(!empty($buffer_array))
-                    {
-                        $buffer_array = array_reverse($buffer_array);
-                        foreach($buffer_array as $value)
-                        {
-                            $buffer.=$value;
-                        }
-                    }
-                }
-
-                fclose($file);
-            }
-
-            if($b_delete)
-            {
-                $this->_delete_site($task_id,true);
-            }
-            $ret['log']=$buffer;
-            $ret['percent']=$staging_percent;
-            $ret['result']='success';
-            echo wp_json_encode($ret);
-        }
-        catch (Exception $error)
-        {
-            $ret['result']='failed';
-            $ret['error']=$error->getMessage();
-            echo wp_json_encode($ret);
-        }
-
-        die();
-    }
-
-    public function cancel_staging()
-    {
-        global $wpvivid_plugin;
-        check_ajax_referer( 'wpvivid_ajax', 'nonce' );
-        $check=current_user_can('manage_options');
-        $check=apply_filters('wpvivid_ajax_check_security',$check);
-        if(!$check)
-        {
-            die();
-        }
-        $task_id=get_option('wpvivid_current_running_staging_task','');
-        if(empty($task_id))
-        {
-            $ret['result']='success';
-            $ret['log']='';
-            $ret['continue']=0;
-            echo wp_json_encode($ret);
-            die();
-        }
-
-        try
-        {
-            $task=new WPvivid_Staging_Task($task_id);
-            $task->cancel_staging();
-
-            $ret['result']='success';
-            echo wp_json_encode($ret);
-        }
-        catch (Exception $error)
-        {
-            $ret['result']='failed';
-            $ret['error']=$error->getMessage();
-            echo wp_json_encode($ret);
-        }
-        die();
-    }
-
-    public function test_additional_database_connect(){
-        global $wpvivid_plugin;
-        check_ajax_referer( 'wpvivid_ajax', 'nonce' );
-        $check=current_user_can('manage_options');
-        $check=apply_filters('wpvivid_ajax_check_security',$check);
-        if(!$check)
-        {
-            die();
-        }
-        try {
-            if (isset($_POST['database_info']) && !empty($_POST['database_info']) && is_string($_POST['database_info'])) {
-                $data = sanitize_text_field($_POST['database_info']);
-                $data = stripslashes($data);
-                $json = json_decode($data, true);
-                $db_user = sanitize_text_field($json['db_user']);
-                $db_pass = sanitize_text_field($json['db_pass']);
-                $db_host = sanitize_text_field($json['db_host']);
-                $db_name = sanitize_text_field($json['db_name']);
-
-                $db = new wpdb($db_user, $db_pass, $db_name, $db_host);
-                // Can not connect to mysql
-                if (!empty($db->error->errors['db_connect_fail']['0'])) {
-                    $ret['result'] = 'failed';
-                    $ret['error'] = 'Failed to connect to MySQL server. Please try again later.';
-                    echo wp_json_encode($ret);
-                    die();
-                }
-
-                // Can not connect to database
-                $db->select($db_name);
-                if (!$db->ready) {
-                    $ret['result'] = 'failed';
-                    $ret['error'] = 'Unable to connect to MySQL database. Please try again later.';
-                    echo wp_json_encode($ret);
-                    die();
-                }
-                $ret['result'] = 'success';
-
-                echo wp_json_encode($ret);
-            }
-        }
-        catch (Exception $error) {
-            $message = 'An exception has occurred. class: '.get_class($error).';msg: '.$error->getMessage().';code: '.$error->getCode().';line: '.$error->getLine().';in_file: '.$error->getFile().';';
-            error_log($message);
-            echo wp_json_encode(array('result'=>'failed','error'=>$message));
-        }
-        die();
-    }
-
-    public function update_staging_exclude_extension(){
-        global $wpvivid_plugin;
-        check_ajax_referer( 'wpvivid_ajax', 'nonce' );
-        $check=current_user_can('manage_options');
-        $check=apply_filters('wpvivid_ajax_check_security',$check);
-        if(!$check)
-        {
-            die();
-        }
-        try {
-            if (isset($_POST['type']) && !empty($_POST['type']) && is_string($_POST['type']) &&
-                isset($_POST['exclude_content']) && !empty($_POST['exclude_content']) && is_string($_POST['exclude_content'])) {
-                $type = sanitize_text_field($_POST['type']);
-                $value = sanitize_text_field($_POST['exclude_content']);
-
-                $staging_option = self::wpvivid_get_staging_history();
-                if (empty($staging_option)) {
-                    $staging_option = array();
-                }
-
-                if ($type === 'upload') {
-                    $staging_option['upload_extension'] = array();
-                    $str_tmp = explode(',', $value);
-                    for ($index = 0; $index < count($str_tmp); $index++) {
-                        if (!empty($str_tmp[$index])) {
-                            $staging_option['upload_extension'][] = $str_tmp[$index];
-                        }
-                    }
-                } else if ($type === 'content') {
-                    $staging_option['content_extension'] = array();
-                    $str_tmp = explode(',', $value);
-                    for ($index = 0; $index < count($str_tmp); $index++) {
-                        if (!empty($str_tmp[$index])) {
-                            $staging_option['content_extension'][] = $str_tmp[$index];
-                        }
-                    }
-                } else if ($type === 'additional_file') {
-                    $staging_option['additional_file_extension'] = array();
-                    $str_tmp = explode(',', $value);
-                    for ($index = 0; $index < count($str_tmp); $index++) {
-                        if (!empty($str_tmp[$index])) {
-                            $staging_option['additional_file_extension'][] = $str_tmp[$index];
-                        }
-                    }
-                }
-
-                self::wpvivid_set_staging_history($staging_option);
-
-                $ret['result'] = 'success';
-                echo wp_json_encode($ret);
-            }
-        }
-        catch (Exception $error) {
-            $message = 'An exception has occurred. class: '.get_class($error).';msg: '.$error->getMessage().';code: '.$error->getCode().';line: '.$error->getLine().';in_file: '.$error->getFile().';';
-            error_log($message);
-            echo wp_json_encode(array('result'=>'failed','error'=>$message));
-        }
-        die();
     }
 
     public function deal_shutdown_error($task_id)
@@ -2192,151 +992,172 @@ class WPvivid_Staging_Free
         }
     }
 
-    public function start_staging()
+    /**
+     * Create a staging task without copying files or database tables.
+     * @throws \Exception
+     */
+    public function create_staging_task()
     {
-        global $wpvivid_plugin;
-        check_ajax_referer( 'wpvivid_ajax', 'nonce' );
-        $check=current_user_can('manage_options');
-        $check=apply_filters('wpvivid_ajax_check_security',$check);
-        if(!$check)
-        {
-            die();
-        }
-
-        $this->end_shutdown_function=false;
-        register_shutdown_function(array($this,'deal_staging_shutdown_error'));
-        $task=false;
+        $lock = $this->acquire_staging_lock('create');
+        if ($lock === false) throw new Exception('A staging task is being created. Please wait.');
+        $task = false;
         try
         {
-            $task_id=get_option('wpvivid_current_running_staging_task','');
-            if(!empty($task_id))
+            $tasks = get_option('wpvivid_staging_task_list', array());
+            $current = get_option('wpvivid_current_running_staging_task', '');
+            if ($current !== '' && isset($tasks[$current]) && $tasks[$current]['status']['str'] !== 'completed')
+                throw new Exception('The current staging task must finish or be cleaned before creating another.');
+            foreach ($tasks as $record)
             {
-                $task=new WPvivid_Staging_Task($task_id);
-                if($task->get_status()==='running')
-                {
-                    $this->end_shutdown_function=true;
-                    die();
-                }
-                $this->log->OpenLogFile($task->get_log_file_name());
+                if (isset($record['status']['str']) &&
+                    in_array($record['status']['str'], array('ready', 'running', 'cancel'), true))
+                    throw new Exception('Another staging task is active or awaiting cleanup.');
             }
-            else
+            foreach (array('path', 'table_prefix', 'custom_dir', 'additional_db') as $key)
             {
-                if(isset($_POST['path']) && isset($_POST['table_prefix']) && isset($_POST['custom_dir']) && isset($_POST['additional_db']))
-                {
-                    $json = sanitize_text_field($_POST['custom_dir']);
-                    $json = stripslashes($json);
-                    $staging_options = json_decode($json, true);
-
-                    $additional_db_json = sanitize_text_field($_POST['additional_db']);
-                    $additional_db_json = stripslashes($additional_db_json);
-                    $additional_db_options = json_decode($additional_db_json, true);
-
-                    $option['options'] = $this->set_staging_option();
-
-                    $src_path = untrailingslashit(ABSPATH);
-                    $path = sanitize_text_field($_POST['path']);
-                    if(isset($_POST['root_dir'])&&$_POST['root_dir']==0)
-                    {
-                        $url_path=$path;
-
-                        $new_site_url = untrailingslashit($this->get_database_site_url()). '/' . $url_path;
-                        $new_home_url = untrailingslashit($this->get_database_home_url()). '/' . $url_path;
-                        $des_path = untrailingslashit(ABSPATH) . '/' . $path;
-                    }
-                    else
-                    {
-                        $url_path=str_replace(ABSPATH,'',WP_CONTENT_DIR).'/' . $path;
-
-                        $new_site_url = untrailingslashit($this->get_database_site_url()). '/' . $url_path;
-                        $new_home_url = untrailingslashit($this->get_database_home_url()). '/' . $url_path;
-
-                        $des_path = WP_CONTENT_DIR . DIRECTORY_SEPARATOR . $path;
-                    }
-
-                    $option['data']['path']['src_path'] = $src_path;
-                    $option['data']['path']['des_path'] = $des_path;
-
-                    $table_prefix = sanitize_text_field($_POST['table_prefix']);
-
-                    $option['data']['restore'] = false;
-                    $option['data']['copy']=false;
-
-                    $this->set_create_staging_option($option,$staging_options,$additional_db_options,$new_site_url,$new_home_url,$table_prefix);
-
-
-                    $task = new WPvivid_Staging_Task();
-                    $task->setup_task($option);
-                    $task->set_memory_limit();
-                    $task->update_action_time('create_time');
-                    $this->log->CreateLogFile($task->get_log_file_name(), 'no_folder', 'staging');
-                    $this->log->WriteLog('Start creating staging site.', 'notice');
-                    $this->log->WriteLogHander();
-                }
+                if (!isset($_POST[$key]) || !is_string($_POST[$key]))
+                    throw new Exception('Invalid staging creation request.');
+            }
+            $staging_options = json_decode(wp_unslash($_POST['custom_dir']), true);
+            $additional_db_options = json_decode(wp_unslash($_POST['additional_db']), true);
+            if (!is_array($staging_options) || !is_array($additional_db_options))
+                throw new Exception('Invalid staging options.');
+            $directory = $this->get_validated_staging_directory();
+            $des_path = $this->validate_staging_target_path($directory['path']);
+            if (file_exists($des_path)) throw new Exception('The staging directory already exists.');
+            $table_prefix = $this->validate_staging_prefix(wp_unslash($_POST['table_prefix']));
+            $option = array('options' => $this->set_staging_option(), 'data' => array());
+            $option['data']['path'] = array('src_path' => untrailingslashit(ABSPATH), 'des_path' => $des_path);
+            $url_path = $directory['name'];
+            if ($_POST['root_dir'] === '1')
+                $url_path = str_replace(ABSPATH, '', WP_CONTENT_DIR) . '/' . $url_path;
+            $new_site_url = untrailingslashit($this->get_database_site_url()) . '/' . $url_path;
+            $new_home_url = untrailingslashit($this->get_database_home_url()) . '/' . $url_path;
+            $option['data']['restore'] = false;
+            $option['data']['copy'] = false;
+            $this->set_create_staging_option($option, $staging_options, $additional_db_options,
+                $new_site_url, $new_home_url, $table_prefix);
+            if (empty($option['data']['db_connect']))
+                throw new Exception('Staging database options are required.');
+            $connection = $option['data']['db_connect'];
+            $db = $this->staging_database($connection);
+            $preexisting = $this->staging_database_tables($db);
+            // Check the actual destination connection, even when another account/host alias was supplied.
+            foreach ($preexisting as $name)
+            {
+                if (strpos($name, $table_prefix) === 0)
+                    throw new Exception('The staging table prefix is already in use.');
             }
 
-            $task_id=$task->get_id();
-            update_option('wpvivid_current_running_staging_task',$task_id,'no');
-            register_shutdown_function(array($this,'deal_shutdown_error'),$task_id);
-
-            $doing=$task->get_doing_task();
-            if($doing===false)
-            {
-                $doing=$task->get_start_next_task();
-            }
-
-            $task->set_time_limit();
-            if(!$task->do_task($doing))
-            {
-                $task->finished_task_with_error();
-                $this->end_shutdown_function=true;
-                die();
-            }
-
-            $doing=$task->get_start_next_task();
-            if($doing==false)
-            {
-                $this->log->WriteLog('Creating staging site is completed.','notice');
-                $task->finished_task();
-            }
+            $task = new WPvivid_Staging_Task();
+            $task->setup_task($option);
+            $task->task['cleanup'] = array(
+                'version' => 1,
+                'path' => $this->normalize_staging_path($des_path),
+                'prefix' => $table_prefix,
+                'connection_hash' => $this->staging_connection_hash($connection),
+                'preexisting_tables' => $preexisting,
+                'tables' => array()
+            );
+            $task->update_task();
+            $task->update_action_time('create_time');
+            update_option('wpvivid_staging_task_cancel', false, 'no');
+            update_option('wpvivid_current_running_staging_task', $task->get_id(), 'no');
+            $this->log->CreateLogFile($task->get_log_file_name(), 'no_folder', 'staging');
+            $this->log->WriteLog('Staging task created. Waiting to execute.', 'notice');
+            return array('result' => 'success', 'task_id' => $task->get_id());
         }
         catch (Exception $error)
         {
-            $message = 'An Error has occurred. class:'.get_class($error).';msg:'.$error->getMessage().';code:'.$error->getCode().';line:'.$error->getLine().';in_file:'.$error->getFile().';';
-            error_log($message);
-            if($task!==false)
-                $task->finished_task_with_error($message);
-            $this->log->WriteLog($message,'error');
+            // No worker has started, so only remove the incomplete task registration.
+            if ($task instanceof WPvivid_Staging_Task)
+            {
+                $tasks = get_option('wpvivid_staging_task_list', array());
+                unset($tasks[$task->get_id()]);
+                update_option('wpvivid_staging_task_list', $tasks, 'no');
+                if (get_option('wpvivid_current_running_staging_task', '') === $task->get_id())
+                    update_option('wpvivid_current_running_staging_task', '', 'no');
+            }
+            throw $error;
         }
-
-        $this->end_shutdown_function=true;
-        die();
+        finally
+        {
+            $this->release_staging_lock($lock);
+        }
     }
 
-    public function set_restart_staging_id()
+    /**
+     * Execute one existing task slice; never creates a task.
+     * @throws \Exception
+     */
+    public function run_staging_task($task_id)
     {
-        global $wpvivid_plugin;
-        check_ajax_referer( 'wpvivid_ajax', 'nonce' );
-        $check=current_user_can('manage_options');
-        $check=apply_filters('wpvivid_ajax_check_security',$check);
-        if(!$check)
+        $task = $this->get_staging_task($task_id);
+        $current = get_option('wpvivid_current_running_staging_task', '');
+        if ($current !== $task_id) throw new Exception('This is not the current staging task.');
+        $lock = $this->acquire_staging_lock($task_id);
+        if ($lock === false)
+            return array('result' => 'success', 'task_id' => $task_id, 'busy' => true);
+        try
         {
-            die();
-        }
-        try {
-            if(isset($_POST['id']))
+            $task->get_task();
+            $this->validate_staging_task_scope($task);
+            if ($task->get_status() === 'cancel')
             {
-                $task_id = sanitize_key($_POST['id']);
-                update_option('wpvivid_current_running_staging_task', $task_id, 'no');
-                $ret['result'] = 'success';
-                echo wp_json_encode($ret);
+                $task->task['status']['str'] = 'cancel';
+                $task->update_task();
+                update_option('wpvivid_staging_task_cancel', false, 'no');
+                return array('result' => 'success', 'task_id' => $task_id, 'cancelled' => true);
             }
+            if ($task->task['status']['str'] !== 'ready')
+                return array('result' => 'success', 'task_id' => $task_id);
+            $this->log->OpenLogFile($task->get_log_file_name());
+            $task->set_memory_limit();
+            $task->set_time_limit();
+            $this->end_shutdown_function = false;
+            register_shutdown_function(array($this, 'deal_staging_shutdown_error'));
+            register_shutdown_function(array($this, 'deal_shutdown_error'), $task_id);
+            try
+            {
+                $doing = $task->get_doing_task();
+                if ($doing === false) $doing = $task->get_start_next_task();
+                $success = $task->do_task($doing);
+                $this->capture_staging_tables($task_id);
+                $task->get_task();
+                if (get_option('wpvivid_staging_task_cancel', false))
+                {
+                    $task->task['status']['str'] = 'cancel';
+                    $task->task['status']['error'] = 'Task cancelled.';
+                    $task->update_task();
+                    update_option('wpvivid_staging_task_cancel', false, 'no');
+                }
+                else if (!$success)
+                {
+                    $task->finished_task_with_error();
+                }
+                else if ($task->get_start_next_task() === false)
+                {
+                    $this->log->WriteLog('Creating staging site is completed.', 'notice');
+                    $task->finished_task();
+                }
+            }
+            catch (Exception $error)
+            {
+                $task->finished_task_with_error($error->getMessage());
+                $this->log->WriteLog($error->getMessage(), 'error');
+                if (!$task->response_sent)
+                    return array('result' => 'failed', 'task_id' => $task_id, 'error' => $error->getMessage());
+            }
+            finally
+            {
+                $this->end_shutdown_function = true;
+            }
+            return $task->response_sent ? false : array('result' => 'success', 'task_id' => $task_id);
         }
-        catch (Exception $error) {
-            $message = 'An exception has occurred. class: '.get_class($error).';msg: '.$error->getMessage().';code: '.$error->getCode().';line: '.$error->getLine().';in_file: '.$error->getFile().';';
-            error_log($message);
-            echo wp_json_encode(array('result'=>'failed','error'=>$message));
+        finally
+        {
+            $this->release_staging_lock($lock);
         }
-        die();
     }
 
     public function set_db_connect_option($new_site_url,$new_home_url,$additional_db_options,$table_prefix,$mu_single_site_id='')
@@ -2890,4 +1711,316 @@ class WPvivid_Staging_Free
         $json['data']['wpvivid_push_staging_history'] = $wpvivid_push_staging_history;
         return $json;
     }
+
+    /**
+     * Validate the requested staging directory.
+     *
+     * @return array
+     * @throws Exception
+     */
+    public function get_validated_staging_directory()
+    {
+        if (!isset($_POST['path']) || !is_string($_POST['path']))
+        {
+            throw new Exception('A valid site path is required.');
+        }
+
+        if (!isset($_POST['root_dir']) ||
+            !is_string($_POST['root_dir']) ||
+            !in_array($_POST['root_dir'], array('0', '1'), true))
+        {
+            throw new Exception('Invalid staging base directory.');
+        }
+
+        $name = wp_unslash($_POST['path']);
+        $base = $_POST['root_dir'] === '0' ? ABSPATH : WP_CONTENT_DIR;
+
+        return array(
+            'name' => $name,
+            'path' => WPvivid_Setting::validate_child_directory($base, $name)
+        );
+    }
+    /** @throws \Exception */
+    public function get_staging_task($task_id)
+    {
+        if (!is_string($task_id) || strlen($task_id) > 64 ||
+            preg_match('/\Awpvivid-[a-f0-9]+\z/', $task_id) !== 1)
+        {
+            throw new Exception('Invalid staging task ID.');
+        }
+        $tasks = get_option('wpvivid_staging_task_list', array());
+        if (!is_array($tasks) || !isset($tasks[$task_id]) ||
+            !is_array($tasks[$task_id]) || !isset($tasks[$task_id]['id']) ||
+            $tasks[$task_id]['id'] !== $task_id)
+        {
+            throw new Exception('Staging task not found.');
+        }
+        return new WPvivid_Staging_Task($task_id);
+    }
+
+    private function normalize_staging_path($path)
+    {
+        $path = untrailingslashit(wp_normalize_path($path));
+        return DIRECTORY_SEPARATOR === '\\' ? strtolower($path) : $path;
+    }
+
+    /** @throws \Exception */
+    private function validate_staging_target_path($path)
+    {
+        if (!is_string($path) || $path === '' ||
+            preg_match('/[\x00-\x1F\x7F]/', $path))
+        {
+            throw new Exception('Invalid staging path.');
+        }
+        $normalized = str_replace('\\', '/', $path);
+        if (preg_match('#(?:\A|/)\.{1,2}(?:/|\z)#', $normalized) || is_link($path))
+        {
+            throw new Exception('Invalid staging path.');
+        }
+        $parent = realpath(dirname($path));
+        if ($parent === false)
+        {
+            throw new Exception('The staging parent directory does not exist.');
+        }
+        $allowed = false;
+        foreach (array(ABSPATH, WP_CONTENT_DIR) as $base)
+        {
+            $resolved = realpath($base);
+            if ($resolved !== false &&
+                $this->normalize_staging_path($parent) === $this->normalize_staging_path($resolved))
+            {
+                $allowed = true;
+            }
+        }
+        if (!$allowed)
+        {
+            throw new Exception('The staging path is outside the allowed location.');
+        }
+        $target = $parent . DIRECTORY_SEPARATOR . basename($path);
+        if (file_exists($target))
+        {
+            $resolved = realpath($target);
+            if ($resolved === false || !is_dir($resolved) ||
+                $this->normalize_staging_path(dirname($resolved)) !== $this->normalize_staging_path($parent))
+            {
+                throw new Exception('Invalid staging target directory.');
+            }
+            $target = $resolved;
+        }
+        $protected = array(ABSPATH, WP_CONTENT_DIR, WP_PLUGIN_DIR, get_theme_root(),
+            ABSPATH . 'wp-admin', ABSPATH . 'wp-includes');
+        $uploads = wp_get_upload_dir();
+        if (!empty($uploads['basedir'])) $protected[] = $uploads['basedir'];
+        $candidate = $this->normalize_staging_path($target);
+        foreach ($protected as $directory)
+        {
+            $resolved = realpath($directory);
+            $protected_path = $this->normalize_staging_path($resolved !== false ? $resolved : $directory);
+            if ($candidate === $protected_path || strpos($protected_path . '/', $candidate . '/') === 0)
+            {
+                throw new Exception('The staging path overlaps the live site.');
+            }
+        }
+        return $target;
+    }
+
+    /** @throws \Exception */
+    private function acquire_staging_lock($task_id)
+    {
+        $folder = $this->log->GetSaveLogFolder();
+        if (!is_dir($folder) && !wp_mkdir_p($folder))
+        {
+            throw new Exception('Failed to create the staging lock directory.');
+        }
+        $path = trailingslashit($folder) . 'wpvivid-staging-' . $task_id . '.lock';
+        if (is_link($path)) throw new Exception('Invalid staging lock file.');
+        $handle = @fopen($path, 'c');
+        if (!$handle) throw new Exception('Failed to open the staging lock file.');
+        if (!flock($handle, LOCK_EX | LOCK_NB))
+        {
+            fclose($handle);
+            return false;
+        }
+        return $handle;
+    }
+
+    private function release_staging_lock($handle)
+    {
+        if (is_resource($handle))
+        {
+            flock($handle, LOCK_UN);
+            fclose($handle);
+        }
+        // Keep the lock inode: unlinking it can allow concurrent locks on different files.
+    }
+
+    /** @throws \Exception */
+    private function validate_staging_prefix($prefix)
+    {
+        if (!is_string($prefix) || $prefix === '' || strlen($prefix) > 64 ||
+            preg_match('/\A[a-zA-Z0-9_]+\z/', $prefix) !== 1)
+        {
+            throw new Exception('Invalid staging table prefix.');
+        }
+        return $prefix;
+    }
+
+    private function staging_connection_hash($connection)
+    {
+        return hash('sha256', serialize(array(
+            !empty($connection['des_use_additional_db']),
+            !empty($connection['des_use_additional_db']) ? (string) $connection['des_dbhost'] : '',
+            !empty($connection['des_use_additional_db']) ? (string) $connection['des_dbname'] : '',
+            !empty($connection['des_use_additional_db']) ? (string) $connection['des_dbuser'] : '',
+            !empty($connection['des_use_additional_db']) ? (string) $connection['des_dbpassword'] : ''
+        )));
+    }
+
+    /** @throws \Exception */
+    private function staging_database($connection)
+    {
+        if (!is_array($connection)) throw new Exception('Invalid staging database information.');
+        if (!empty($connection['des_use_additional_db']))
+        {
+            foreach (array('des_dbhost', 'des_dbname', 'des_dbuser', 'des_dbpassword') as $key)
+            {
+                if (!isset($connection[$key]) || !is_string($connection[$key]))
+                    throw new Exception('Invalid staging database information.');
+            }
+        }
+        return $this->wpvivid_get_staging_database_object(
+            !empty($connection['des_use_additional_db']),
+            isset($connection['des_dbuser']) ? $connection['des_dbuser'] : '',
+            isset($connection['des_dbpassword']) ? $connection['des_dbpassword'] : '',
+            isset($connection['des_dbname']) ? $connection['des_dbname'] : '',
+            isset($connection['des_dbhost']) ? $connection['des_dbhost'] : ''
+        );
+    }
+
+    /** @throws \Exception */
+    private function staging_database_tables($db)
+    {
+        $tables = $db->get_col('SHOW TABLES');
+        if (!is_array($tables) || !empty($db->last_error))
+            throw new Exception('Failed to inspect the staging database tables.');
+        return array_values($tables);
+    }
+
+    /** @throws \Exception */
+    private function validate_staging_task_scope($task)
+    {
+        if ($task->is_restore() || $task->is_copy())
+            throw new Exception('This endpoint only executes newly created staging tasks.');
+        $data = $task->task;
+        if (empty($data['cleanup']) || !is_array($data['cleanup']) ||
+            !isset($data['path']['des_path'], $data['db_connect']))
+            throw new Exception('The task has no verified staging cleanup information. Please recreate it.');
+        $scope = $data['cleanup'];
+        $path = $this->validate_staging_target_path($data['path']['des_path']);
+        $prefix = $this->validate_staging_prefix($data['db_connect']['new_prefix']);
+        if ($this->normalize_staging_path($path) !== $scope['path'] ||
+            $prefix !== $scope['prefix'] ||
+            $this->staging_connection_hash($data['db_connect']) !== $scope['connection_hash'])
+            throw new Exception('The staging task destination has changed.');
+        return $scope;
+    }
+
+    /**
+     * Authorize an exact table before the staging copy/installation may write it.
+     * @throws \Exception
+     */
+    public function authorize_staging_table($task_id, $table_name)
+    {
+        $task = $this->get_staging_task($task_id);
+        // Existing restore/copy jobs use their own workflow, not the new-create cleanup manifest.
+        if ($task->is_restore() || $task->is_copy()) return;
+        $scope = $this->validate_staging_task_scope($task);
+        if (!is_string($table_name) || strpos($table_name, $scope['prefix']) !== 0 ||
+            in_array($table_name, $scope['preexisting_tables'], true))
+            throw new Exception('The destination table is not owned by this staging task.');
+        $db = $this->staging_database($task->task['db_connect']);
+        $tables = $this->staging_database_tables($db);
+        if (in_array($table_name, $tables, true) && !in_array($table_name, $scope['tables'], true))
+            throw new Exception('The destination table already exists outside this staging task.');
+        if (!in_array($table_name, $scope['tables'], true))
+        {
+            $task->task['cleanup']['tables'][] = $table_name;
+            $task->update_task();
+        }
+    }
+
+    /** @throws \Exception */
+    private function capture_staging_tables($task_id)
+    {
+        $task = $this->get_staging_task($task_id);
+        $scope = $this->validate_staging_task_scope($task);
+        $db = $this->staging_database($task->task['db_connect']);
+        foreach ($this->staging_database_tables($db) as $name)
+        {
+            if (strpos($name, $scope['prefix']) === 0 &&
+                !in_array($name, $scope['preexisting_tables'], true) &&
+                !in_array($name, $task->task['cleanup']['tables'], true))
+                $task->task['cleanup']['tables'][] = $name;
+        }
+        $task->update_task();
+    }
+
+    /**
+     * Return false while the cancelled task still has an active worker.
+     * @throws \Exception
+     */
+    public function acknowledge_staging_cancel($task_id)
+    {
+        $task = $this->get_staging_task($task_id);
+        $lock = $this->acquire_staging_lock($task_id);
+        if ($lock === false) return false;
+        try
+        {
+            $task->get_task();
+            if ($task->is_restore() || $task->is_copy())
+                throw new Exception('This task cannot be cleaned as a new staging site.');
+            $task->task['status']['str'] = 'cancel';
+            $task->task['status']['error'] = 'Task cancelled.';
+            $task->update_task();
+            update_option('wpvivid_staging_task_cancel', false, 'no');
+            return true;
+        }
+        finally
+        {
+            $this->release_staging_lock($lock);
+        }
+    }
+
+    /** @throws \Exception */
+    public function prepare_staging_task_resume($task_id)
+    {
+        $task = $this->get_staging_task($task_id);
+        $this->validate_staging_task_scope($task);
+        $current = get_option('wpvivid_current_running_staging_task', '');
+        if ($current !== '' && $current !== $task_id)
+            throw new Exception('Another staging task is active.');
+        if ($task->get_status() === 'cancel' || $task->task['status']['str'] === 'completed')
+            throw new Exception('This staging task cannot be resumed.');
+        $lock = $this->acquire_staging_lock($task_id);
+        if ($lock !== false)
+        {
+            try
+            {
+                $task->get_task();
+                if ($task->task['status']['str'] === 'error')
+                {
+                    $task->task['status']['str'] = 'ready';
+                    $task->task['status']['error'] = '';
+                    $task->update_task();
+                }
+            }
+            finally
+            {
+                $this->release_staging_lock($lock);
+            }
+        }
+        update_option('wpvivid_current_running_staging_task', $task_id, 'no');
+        return array('result' => 'success', 'task_id' => $task_id);
+    }
+
 }

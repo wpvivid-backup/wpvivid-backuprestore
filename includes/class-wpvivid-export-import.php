@@ -11,12 +11,25 @@ class WPvivid_Export_Import
 
     public function __construct()
     {
-        add_action('wp_ajax_wpvivid_export_post_step2', array($this, 'export_post_step2'));
-        add_action('wp_ajax_wpvivid_export_post_step3', array($this, 'export_post_step3'));
-
         add_filter('wpvivid_get_toolbar_menus',array($this,'get_toolbar_menus'),21);
         add_filter('wpvivid_get_admin_menus',array($this,'get_admin_menus'),21);
 
+        add_action('admin_head', array($this, 'my_admin_custom_styles'));
+
+        add_action('wpvivid_handle_export_success',array($this,'handle_export_success'),10);
+        add_action('wpvivid_handle_export_failed',array($this,'handle_export_failed'),10, 2);
+
+
+        add_filter('wpvivid_get_screen_ids',array($this,'get_screen_ids'),12);
+
+        $this->load_ajax();
+        $this->end_shutdown_function = false;
+    }
+
+    public function load_ajax()
+    {
+        add_action('wp_ajax_wpvivid_export_post_step2', array($this, 'export_post_step2'));
+        add_action('wp_ajax_wpvivid_export_post_step3', array($this, 'export_post_step3'));
         add_action('wp_ajax_wpvivid_export_now', array($this, 'export_now'));
         add_action('wp_ajax_wpvivid_prepare_export_post', array($this, 'prepare_export_post'));
         add_action('wp_ajax_wpvivid_export_list_tasks', array($this, 'list_tasks'));
@@ -25,19 +38,7 @@ class WPvivid_Export_Import
         add_action('wp_ajax_wpvivid_get_post_list_page', array($this, 'get_list_page'));
         add_action('wp_ajax_wpvivid_get_import_list_page', array($this, 'get_import_list_page'));
 
-        add_action('wp_ajax_wpvivid_get_export_list',array($this, 'get_export_list'));
-
-        add_action('admin_head', array($this, 'my_admin_custom_styles'));
-
-        add_action('wpvivid_handle_export_success',array($this,'handle_export_success'),10);
-        add_action('wpvivid_handle_export_failed',array($this,'handle_export_failed'),10, 2);
-
-        add_action('wp_ajax_wpvivid_delete_export_list',array($this,'delete_export_list'),10);
-
-        add_filter('wpvivid_get_screen_ids',array($this,'get_screen_ids'),12);
-
         add_action('wp_ajax_wpvivid_start_import', array($this, 'start_import'));
-
         add_action('wp_ajax_wpvivid_download_export_backup', array($this, 'wpvivid_download_export_backup'));
         add_action('wp_ajax_wpvivid_check_import_file', array($this, 'check_import_file'));
         add_action('wp_ajax_wpvivid_upload_import_files',array($this,'upload_import_files'));
@@ -46,8 +47,27 @@ class WPvivid_Export_Import
         add_action('wp_ajax_wpvivid_scan_import_folder', array($this, 'wpvivid_scan_import_folder'));
         add_action('wp_ajax_wpvivid_calc_import_folder_size', array($this, 'calc_import_folder_size'));
         add_action('wp_ajax_wpvivid_clean_import_folder', array($this, 'clean_import_folder'));
-        //
-        $this->end_shutdown_function = false;
+
+        add_action('wp_ajax_wpvivid_get_export_list',array($this, 'get_export_list'));
+        add_action('wp_ajax_wpvivid_delete_export_list',array($this,'delete_export_list'),10);
+    }
+
+    public function check_ajax_security()
+    {
+        check_ajax_referer('wpvivid_ajax', 'nonce');
+
+        if (is_multisite())
+        {
+            die();
+        }
+
+        $check = current_user_can('manage_options');
+        $check = apply_filters('wpvivid_ajax_check_security', $check);
+
+        if (!$check)
+        {
+            die();
+        }
     }
 
     public function get_screen_ids($screen_ids)
@@ -118,8 +138,8 @@ class WPvivid_Export_Import
                 <div style="box-sizing: border-box;">
                     <div class="wpvivid-text-space-bottom"><?php esc_html_e('Export posts or pages with images in bulk.', 'wpvivid-backuprestore'); ?>
                         <span class="wpvivid-feature-pro">
-                            <a href="https://docs.wpvivid.com/export-content.html" target="_blank" style="text-decoration: none;"><?php esc_html_e('Learn more', 'wpvivid-backuprestore'); ?></a>
-                        </span>
+                        <a href="https://docs.wpvivid.com/export-content.html" target="_blank" style="text-decoration: none;"><?php esc_html_e('Learn more', 'wpvivid-backuprestore'); ?></a>
+                    </span>
                     </div>
                     <div class="wpvivid-text-space-bottom"><?php esc_html_e('This will contain all of your posts, pages, comments, terms and images (original images, featured images and thumbnails).', 'wpvivid-backuprestore'); ?></div>
                     <div class="wpvivid-text-space-bottom"><strong><?php esc_html_e('Note:', 'wpvivid-backuprestore'); ?></strong>&nbsp<?php esc_html_e('Try to select fewer items when you are facing a shortage of server resources (typically presented as a timeout error).', 'wpvivid-backuprestore'); ?></div>
@@ -262,6 +282,7 @@ class WPvivid_Export_Import
                 jQuery('#wpvivid_post_selector').show();
                 jQuery('#wpvivid_post_list').hide();
             });
+
             jQuery('#wpvivid_export_page').on("click", "#wpvivid-post-query-submit",function()
             {
                 var post_type = jQuery('#wpvivid-post-query-submit').attr('name');
@@ -411,10 +432,13 @@ class WPvivid_Export_Import
                         'post_type': post_type,
                         'export_data': export_data
                     };
+
                     wpvivid_export_lock_unlock('lock');
+
                     wpvivid_post_request(ajax_data, function(data)
                     {
                         var jsonarray = jQuery.parseJSON(data);
+
                         if (jsonarray.result === 'success')
                         {
                             export_task_id=jsonarray.task_id;
@@ -469,6 +493,7 @@ class WPvivid_Export_Import
 
             function wpvivid_change_page(page) {
                 var post_type='post';
+
                 jQuery('input:radio[name=post_type]').each(function() {
                     if(jQuery(this).prop('checked'))
                     {
@@ -480,6 +505,7 @@ class WPvivid_Export_Import
 
                 jQuery('input[name="post[]"]').each(function (i) {
                     var id=jQuery(this).val();
+
                     if(jQuery(this).prop('checked'))
                     {
                         post_ids[id]=1;
@@ -499,6 +525,7 @@ class WPvivid_Export_Import
 
                 wpvivid_post_request(ajax_data, function(data) {
                     var jsonarray = jQuery.parseJSON(data);
+
                     if (jsonarray.result === 'success') {
                         jQuery('#wpvivid_post_list').html(jsonarray.rows);
                     }
@@ -522,10 +549,12 @@ class WPvivid_Export_Import
                 wpvivid_post_request(ajax_data, function(data)
                 {
                     var jsonarray = jQuery.parseJSON(data);
+
                     if (jsonarray.result === 'success')
                     {
                         retry_count=0;
                         export_task_id=jsonarray.task_id;
+
                         if(jsonarray.show)
                         {
                             jQuery('#wpvivid_export_task_progress').show();
@@ -541,17 +570,26 @@ class WPvivid_Export_Import
                         if(jsonarray.completed)
                         {
                             wpvivid_export_lock_unlock('unlock');
-                            //jQuery('#wpvivid_export_notice').show();
-                            //jQuery('#wpvivid_export_notice').append(jsonarray.doing);
+
                             jQuery('#wpvivid_export_summary').show();
                             jQuery('#wpvivid_export_summary').html(jsonarray.doing);
+
+                            jQuery('#wpvivid_export_summary .wpvivid-download-export')
+                                .data('file-name', jsonarray.file_name)
+                                .data('file-size', jsonarray.file_size);
+
                             jQuery('html, body').animate({scrollTop: jQuery("#wpvivid_export_notice").offset().top}, 'slow');
-                            wpvivid_download_export(jsonarray.file_name, jsonarray.file_size);
+
+                            wpvivid_download_export(
+                                jsonarray.file_name,
+                                jsonarray.file_size
+                            );
                         }
 
                         if(jsonarray.continue)
                         {
                             wpvivid_export_lock_unlock('lock');
+
                             setTimeout(function ()
                             {
                                 wpvivid_export_progpress();
@@ -572,6 +610,7 @@ class WPvivid_Export_Import
                 }, function(XMLHttpRequest, textStatus, errorThrown)
                 {
                     retry_count++;
+
                     if(retry_count<3)
                     {
                         setTimeout(function () {
@@ -581,8 +620,30 @@ class WPvivid_Export_Import
                 });
             }
 
-            function wpvivid_download_export(file_name, file_size){
-                location.href =ajaxurl+'?_wpnonce='+wpvivid_ajax_object.ajax_nonce+'&action=wpvivid_download_export_backup&file_name='+file_name+'&file_size='+file_size;
+            jQuery('#wpvivid_export_summary').on(
+                'click',
+                '.wpvivid-download-export',
+                function(event)
+                {
+                    event.preventDefault();
+
+                    var file_name = jQuery(this).data('file-name');
+                    var file_size = jQuery(this).data('file-size');
+
+                    wpvivid_download_export(
+                        file_name,
+                        file_size
+                    );
+                }
+            );
+
+            function wpvivid_download_export(file_name, file_size)
+            {
+                location.href = ajaxurl
+                    + '?nonce=' + encodeURIComponent(wpvivid_ajax_object.ajax_nonce)
+                    + '&action=wpvivid_download_export_backup'
+                    + '&file_name=' + encodeURIComponent(file_name)
+                    + '&file_size=' + encodeURIComponent(file_size);
             }
 
             jQuery(document).ready(function (){
@@ -590,13 +651,16 @@ class WPvivid_Export_Import
                 $task_id = false;
                 $post_type = false;
                 $tasks=WPvivid_Exporter_taskmanager::get_tasks();
+
                 foreach ($tasks as $task){
                     $task_id = $task['id'];
                     $post_type = $task['options']['backup_options']['post_type'];
                     break;
                 }
                 ?>
+
                 var task_id = '<?php echo esc_attr($task_id); ?>';
+
                 if(task_id != false){
                     export_task_id = task_id;
                     wpvivid_export_lock_unlock('lock');
@@ -609,92 +673,71 @@ class WPvivid_Export_Import
 
     public function export_post_step2()
     {
-        check_ajax_referer( 'wpvivid_ajax', 'nonce' );
-        $check=current_user_can('manage_options');
-        $check=apply_filters('wpvivid_ajax_check_security',$check);
-        if(!$check)
+        $this->check_ajax_security();
+
+        if (!isset($_POST['post_type']) || !is_string($_POST['post_type']))
         {
+            echo wp_json_encode(array(
+                'result' => 'failed',
+                'error'  => __('Invalid post type.', 'wpvivid-backuprestore'),
+            ));
             die();
         }
-        if(isset($_POST['post_type']))
+
+        global $wpdb;
+
+        $post_type = sanitize_key(wp_unslash($_POST['post_type']));
+
+        if (!in_array($post_type, array('post', 'page'), true))
         {
-            global $wpdb;
+            echo wp_json_encode(array(
+                'result' => 'failed',
+                'error'  => __('Invalid post type.', 'wpvivid-backuprestore'),
+            ));
+            die();
+        }
 
-            $post_type = sanitize_key(wp_unslash($_POST['post_type']));
-            if (!in_array($post_type, array('post', 'page'), true))
-            {
-                echo wp_json_encode(array(
-                    'result' => 'failed',
-                    'error'  => __('Invalid post type.', 'wpvivid-backuprestore'),
-                ));
-                die();
-            }
+        $descript_type = $post_type === 'post' ? 'posts' : 'pages';
+        $btn_text = $post_type === 'post'
+            ? __('Show Posts', 'wpvivid-backuprestore')
+            : __('Show Pages', 'wpvivid-backuprestore');
 
-            $descript_type = $post_type === 'post' ? 'posts' : 'pages';
-            $btn_text = $post_type === 'post' ? __('Show Posts', 'wpvivid-backuprestore') : __('Show Pages', 'wpvivid-backuprestore');
-
-            ob_start();
-            ?>
-            <div style="width:100%; border:1px solid #f1f1f1; float:left; box-sizing: border-box;margin-bottom:10px;">
-                <div style="box-sizing: border-box; margin: 1px; background-color: #f1f1f1;"><h2><?php esc_html_e('Choose what to export', 'wpvivid-backuprestore'); ?></h2></div>
+        ob_start();
+        ?>
+        <div style="width:100%; border:1px solid #f1f1f1; float:left; box-sizing: border-box;margin-bottom:10px;">
+            <div style="box-sizing: border-box; margin: 1px; background-color: #f1f1f1;">
+                <h2><?php esc_html_e('Choose what to export', 'wpvivid-backuprestore'); ?></h2>
             </div>
-            <div style="clear: both;"></div>
-            <div style="width:100%; border:1px solid #f1f1f1; float:left; padding:10px 10px 0 10px;margin-bottom:10px; box-sizing: border-box;">
-                <fieldset>
-                    <legend class="screen-reader-text"><span>input type="radio"</span></legend>
-                    <div class="wpvivid-element-space-bottom wpvivid-element-space-right" style="float: left;">
-                        <label>
-                            <input type="radio" option="export" name="contain" value="list" checked/><?php esc_html_e('Filter Posts/Pages', 'wpvivid-backuprestore'); ?>
-                        </label>
-                    </div>
-                    <div style="clear: both;"></div>
-                </fieldset>
+        </div>
+        <div style="clear: both;"></div>
 
-                <div id="wpvivid_export_custom" style="margin-bottom: 10px;">
-                    <table id="wpvivid_post_selector" class="wp-list-table widefat plugins" style="width:100%; border:1px solid #f1f1f1;">
-                        <tbody>
-                        <?php
-                        if($post_type !== 'page') {
-                            ?>
-                            <tr>
-                                <td class="plugin-title column-primary">
-                                    <div class="wpvivid-storage-form regular-text">
-                                        <?php
-                                        wp_dropdown_categories(
-                                            array(
-                                                'class' => 'regular-text',
-                                                'show_option_all' => __('All Categories', 'wpvivid-backuprestore')
-                                            )
-                                        );
-                                        ?>
-                                    </div>
-                                </td>
-                                <td class="column-description desc">
-                                    <div class="wpvivid-storage-form-desc">
-                                        <i>
-                                            <?php
-                                            echo esc_html(sprintf('Export %s of all categories or a specific category.', $descript_type));
-                                            ?>
-                                        </i>
-                                    </div>
-                                </td>
-                            </tr>
-                            <?php
-                        }
+        <div style="width:100%; border:1px solid #f1f1f1; float:left; padding:10px 10px 0 10px;margin-bottom:10px; box-sizing: border-box;">
+            <fieldset>
+                <legend class="screen-reader-text"><span>input type="radio"</span></legend>
+                <div class="wpvivid-element-space-bottom wpvivid-element-space-right" style="float: left;">
+                    <label>
+                        <input type="radio" option="export" name="contain" value="list" checked/>
+                        <?php esc_html_e('Filter Posts/Pages', 'wpvivid-backuprestore'); ?>
+                    </label>
+                </div>
+                <div style="clear: both;"></div>
+            </fieldset>
+
+            <div id="wpvivid_export_custom" style="margin-bottom: 10px;">
+                <table id="wpvivid_post_selector" class="wp-list-table widefat plugins" style="width:100%; border:1px solid #f1f1f1;">
+                    <tbody>
+                    <?php
+                    if ($post_type !== 'page')
+                    {
                         ?>
                         <tr>
                             <td class="plugin-title column-primary">
                                 <div class="wpvivid-storage-form regular-text">
                                     <?php
-                                    $authors = $wpdb->get_col($wpdb->prepare("SELECT DISTINCT post_author FROM {$wpdb->posts} WHERE post_type = %s", $post_type));
-                                    wp_dropdown_users(
+                                    wp_dropdown_categories(
                                         array(
-                                            'class'           => 'regular-text',
-                                            'include'         => $authors,
-                                            'name'            => 'post_author',
-                                            'multi'           => true,
-                                            'show_option_all' => __( 'All Authors', 'wpvivid-backuprestore' ),
-                                            'show'            => 'display_name_with_login',
+                                            'class' => 'regular-text',
+                                            'show_option_all' => __('All Categories', 'wpvivid-backuprestore')
                                         )
                                     );
                                     ?>
@@ -704,215 +747,405 @@ class WPvivid_Export_Import
                                 <div class="wpvivid-storage-form-desc">
                                     <i>
                                         <?php
-                                        echo esc_html(sprintf('Export %s of all authors or a specific author.', $descript_type));
+                                        echo esc_html(
+                                            sprintf(
+                                                'Export %s of all categories or a specific category.',
+                                                $descript_type
+                                            )
+                                        );
                                         ?>
                                     </i>
                                 </div>
                             </td>
                         </tr>
+                        <?php
+                    }
+                    ?>
 
-                        <tr>
-                            <td class="plugin-title column-primary">
-                                <div class="wpvivid-storage-form regular-text">
-                                    <label for="post-start-date" class="label-responsive" style="display: block;"></label>
-                                    <select class="regular-text" name="post_start_date" id="post-start-date">
-                                        <option value="0"><?php esc_html_e( '&mdash; Select &mdash;', 'wpvivid-backuprestore' ); ?></option>
-                                        <?php $this->export_date_options($post_type); ?>
-                                    </select>
-                                </div>
-                            </td>
-                            <td class="column-description desc">
-                                <div class="wpvivid-storage-form-desc">
-                                    <i>
-                                        <?php
-                                        echo esc_html(sprintf('Export %s published after this date.', $descript_type));
-                                        ?>
-                                    </i>
-                                </div>
-                            </td>
-                        </tr>
+                    <tr>
+                        <td class="plugin-title column-primary">
+                            <div class="wpvivid-storage-form regular-text">
+                                <?php
+                                $authors = $wpdb->get_col(
+                                    $wpdb->prepare(
+                                        "SELECT DISTINCT post_author FROM {$wpdb->posts} WHERE post_type = %s",
+                                        $post_type
+                                    )
+                                );
 
-                        <tr>
-                            <td class="plugin-title column-primary">
-                                <div class="wpvivid-storage-form regular-text">
-                                    <label for="post-end-date" class="label-responsive" style="display: block;"></label>
-                                    <select class="regular-text" name="post_end_date" id="post-end-date">
-                                        <option value="0"><?php esc_html_e( '&mdash; Select &mdash;', 'wpvivid-backuprestore' ); ?></option>
-                                        <?php $this->export_date_options($post_type); ?>
-                                    </select>
-                                </div>
-                            </td>
-                            <td class="column-description desc">
-                                <div class="wpvivid-storage-form-desc">
-                                    <i>
-                                        <?php
-                                        echo esc_html(sprintf('Export %s published before this date.', $descript_type));
-                                        ?>
-                                    </i>
-                                </div>
-                            </td>
-                        </tr>
+                                wp_dropdown_users(
+                                    array(
+                                        'class'           => 'regular-text',
+                                        'include'         => $authors,
+                                        'name'            => 'post_author',
+                                        'multi'           => true,
+                                        'show_option_all' => __('All Authors', 'wpvivid-backuprestore'),
+                                        'show'            => 'display_name_with_login',
+                                    )
+                                );
+                                ?>
+                            </div>
+                        </td>
 
-                        <tr style="display: none;">
-                            <td class="plugin-title column-primary">
-                                <div class="wpvivid-storage-form">
-                                    <input type="text" class="regular-text" id="post-search-id-input" name="post-id" autocomplete="off" value=""/>
-                                </div>
-                            </td>
-                            <td class="column-description desc">
-                                <div class="wpvivid-storage-form-desc">
-                                    <i>Enter a <?php echo esc_html($post_type); ?> ID.(optional)</i>
-                                </div>
-                            </td>
-                        </tr>
+                        <td class="column-description desc">
+                            <div class="wpvivid-storage-form-desc">
+                                <i>
+                                    <?php
+                                    echo esc_html(
+                                        sprintf(
+                                            'Export %s of all authors or a specific author.',
+                                            $descript_type
+                                        )
+                                    );
+                                    ?>
+                                </i>
+                            </div>
+                        </td>
+                    </tr>
 
-                        <tr style="display: none;">
-                            <td class="plugin-title column-primary">
-                                <div class="wpvivid-storage-form">
-                                    <input type="text" class="regular-text" id="post-search-title-input" name="post-title" autocomplete="off" value=""/>
-                                </div>
-                            </td>
-                            <td class="column-description desc">
-                                <div class="wpvivid-storage-form-desc">
-                                    <i>Enter a <?php echo esc_html($post_type); ?> title.(optional)</i>
-                                </div>
-                            </td>
-                        </tr>
+                    <tr>
+                        <td class="plugin-title column-primary">
+                            <div class="wpvivid-storage-form regular-text">
+                                <label for="post-start-date" class="label-responsive" style="display: block;"></label>
+                                <select class="regular-text" name="post_start_date" id="post-start-date">
+                                    <option value="0">
+                                        <?php esc_html_e('&mdash; Select &mdash;', 'wpvivid-backuprestore'); ?>
+                                    </option>
+                                    <?php $this->export_date_options($post_type); ?>
+                                </select>
+                            </div>
+                        </td>
 
-                        <tr>
-                            <td class="plugin-title column-primary">
-                                <div class="wpvivid-storage-form">
-                                    <input class="button-primary" id="wpvivid-post-query-submit" type="submit" name="<?php echo esc_attr($post_type); ?>" value="<?php echo esc_attr($btn_text); ?>" />
-                                </div>
-                            </td>
-                            <td class="column-description desc">
-                                <div class="wpvivid-storage-form-desc">
-                                    <i>
-                                        <?php
-                                        echo esc_html(sprintf('Search for %s according to the above rules.', $post_type));
-                                        ?>
-                                    </i>
-                                </div>
-                            </td>
-                        </tr>
-                        </tbody>
-                    </table>
-                    <div id="wpvivid_post_list"></div>
-                </div>
+                        <td class="column-description desc">
+                            <div class="wpvivid-storage-form-desc">
+                                <i>
+                                    <?php
+                                    echo esc_html(
+                                        sprintf(
+                                            'Export %s published after this date.',
+                                            $descript_type
+                                        )
+                                    );
+                                    ?>
+                                </i>
+                            </div>
+                        </td>
+                    </tr>
+
+                    <tr>
+                        <td class="plugin-title column-primary">
+                            <div class="wpvivid-storage-form regular-text">
+                                <label for="post-end-date" class="label-responsive" style="display: block;"></label>
+                                <select class="regular-text" name="post_end_date" id="post-end-date">
+                                    <option value="0">
+                                        <?php esc_html_e('&mdash; Select &mdash;', 'wpvivid-backuprestore'); ?>
+                                    </option>
+                                    <?php $this->export_date_options($post_type); ?>
+                                </select>
+                            </div>
+                        </td>
+
+                        <td class="column-description desc">
+                            <div class="wpvivid-storage-form-desc">
+                                <i>
+                                    <?php
+                                    echo esc_html(
+                                        sprintf(
+                                            'Export %s published before this date.',
+                                            $descript_type
+                                        )
+                                    );
+                                    ?>
+                                </i>
+                            </div>
+                        </td>
+                    </tr>
+
+                    <tr style="display: none;">
+                        <td class="plugin-title column-primary">
+                            <div class="wpvivid-storage-form">
+                                <input type="text" class="regular-text" id="post-search-id-input" name="post-id" autocomplete="off" value=""/>
+                            </div>
+                        </td>
+                        <td class="column-description desc">
+                            <div class="wpvivid-storage-form-desc">
+                                <i>Enter a <?php echo esc_html($post_type); ?> ID.(optional)</i>
+                            </div>
+                        </td>
+                    </tr>
+
+                    <tr style="display: none;">
+                        <td class="plugin-title column-primary">
+                            <div class="wpvivid-storage-form">
+                                <input type="text" class="regular-text" id="post-search-title-input" name="post-title" autocomplete="off" value=""/>
+                            </div>
+                        </td>
+                        <td class="column-description desc">
+                            <div class="wpvivid-storage-form-desc">
+                                <i>Enter a <?php echo esc_html($post_type); ?> title.(optional)</i>
+                            </div>
+                        </td>
+                    </tr>
+
+                    <tr>
+                        <td class="plugin-title column-primary">
+                            <div class="wpvivid-storage-form">
+                                <input
+                                        class="button-primary"
+                                        id="wpvivid-post-query-submit"
+                                        type="submit"
+                                        name="<?php echo esc_attr($post_type); ?>"
+                                        value="<?php echo esc_attr($btn_text); ?>"
+                                />
+                            </div>
+                        </td>
+
+                        <td class="column-description desc">
+                            <div class="wpvivid-storage-form-desc">
+                                <i>
+                                    <?php
+                                    echo esc_html(
+                                        sprintf(
+                                            'Search for %s according to the above rules.',
+                                            $post_type
+                                        )
+                                    );
+                                    ?>
+                                </i>
+                            </div>
+                        </td>
+                    </tr>
+
+                    </tbody>
+                </table>
+
+                <div id="wpvivid_post_list"></div>
             </div>
+        </div>
 
-            <div style="width:100%; border:1px solid #f1f1f1; float:left; box-sizing: border-box;margin-bottom:10px;">
-                <div style="box-sizing: border-box; margin: 1px; background-color: #f1f1f1;"><h2><?php esc_html_e('Comment the export (optional)', 'wpvivid-backuprestore'); ?></h2></div>
+        <div style="width:100%; border:1px solid #f1f1f1; float:left; box-sizing: border-box;margin-bottom:10px;">
+            <div style="box-sizing: border-box; margin: 1px; background-color: #f1f1f1;">
+                <h2><?php esc_html_e('Comment the export (optional)', 'wpvivid-backuprestore'); ?></h2>
             </div>
-            <div style="clear: both;"></div>
-            <div style="width:100%; border:1px solid #f1f1f1; float:left; padding:10px 10px 0 10px;margin-bottom:10px; box-sizing: border-box;">
-                <div>
-                    <div class="wpvivid-element-space-bottom wpvivid-text-space-right" style="float: left; padding-top: 6px;"><?php esc_html_e('Comment the export: ', 'wpvivid-backuprestore'); ?></div>
-                    <div class="wpvivid-element-space-bottom wpvivid-text-space-right" style="float: left;">
-                        <input type="text" option="export" name="post_comment" id="wpvivid_set_post_comment" onkeyup="value=value.replace(/[^a-zA-Z0-9]/g,'')" onpaste="value=value.replace(/[^\a-\z\A-\Z0-9]/g,'')" />
-                    </div>
-                    <div class="wpvivid-element-space-bottom wpvivid-text-space-right" style="float: left; padding-top: 6px;"><?php esc_html_e('Only letters (except for wpvivid) and numbers are allowed.', 'wpvivid-backuprestore'); ?></div>
-                    <div style="clear: both;"></div>
+        </div>
+
+        <div style="clear: both;"></div>
+
+        <div style="width:100%; border:1px solid #f1f1f1; float:left; padding:10px 10px 0 10px;margin-bottom:10px; box-sizing: border-box;">
+            <div>
+                <div class="wpvivid-element-space-bottom wpvivid-text-space-right" style="float: left; padding-top: 6px;">
+                    <?php esc_html_e('Comment the export: ', 'wpvivid-backuprestore'); ?>
                 </div>
-                <div>
-                    <div class="wpvivid-element-space-bottom wpvivid-text-space-right" style="float: left;"><?php esc_html_e('Sample:', 'wpvivid-backuprestore'); ?></div>
-                    <div class="wpvivid-element-space-bottom" style="float: left;">
-                        <div class="wpvivid-element-space-bottom" style="display: inline;" id="wpvivid_post_comment">*</div><div class="wpvivid-element-space-bottom" style="display: inline;">_wpvivid-5dbf8d6a5f133_2019-11-08-03-15_export_<?php echo esc_html($post_type); ?>.zip</div>
-                    </div>
-                    <div style="clear: both;"></div>
+
+                <div class="wpvivid-element-space-bottom wpvivid-text-space-right" style="float: left;">
+                    <input
+                            type="text"
+                            option="export"
+                            name="post_comment"
+                            id="wpvivid_set_post_comment"
+                            onkeyup="value=value.replace(/[^a-zA-Z0-9]/g,'')"
+                            onpaste="value=value.replace(/[^\a-\z\A-\Z0-9]/g,'')"
+                    />
                 </div>
+
+                <div class="wpvivid-element-space-bottom wpvivid-text-space-right" style="float: left; padding-top: 6px;">
+                    <?php esc_html_e('Only letters (except for wpvivid) and numbers are allowed.', 'wpvivid-backuprestore'); ?>
+                </div>
+
+                <div style="clear: both;"></div>
             </div>
 
             <div>
-                <input class="button-primary" id="wpvivid_start_export" type="submit" name="<?php echo esc_attr($post_type); ?>" value="<?php esc_attr_e('Export and Download', 'wpvivid-backuprestore'); ?>" style="pointer-events: none; opacity: 0.4;">
-            </div>
-            <?php
+                <div class="wpvivid-element-space-bottom wpvivid-text-space-right" style="float: left;">
+                    <?php esc_html_e('Sample:', 'wpvivid-backuprestore'); ?>
+                </div>
 
-            $html = ob_get_clean();
-            $ret['result']='success';
-            $ret['html']=$html;
-        }
-        else
-        {
-            $ret['result']='failed';
-            $ret['error']='not set post type';
-        }
-        echo wp_json_encode($ret);
+                <div class="wpvivid-element-space-bottom" style="float: left;">
+                    <div class="wpvivid-element-space-bottom" style="display: inline;" id="wpvivid_post_comment">*</div>
+                    <div class="wpvivid-element-space-bottom" style="display: inline;">
+                        _wpvivid-5dbf8d6a5f133_2019-11-08-03-15_export_<?php echo esc_html($post_type); ?>.zip
+                    </div>
+                </div>
+
+                <div style="clear: both;"></div>
+            </div>
+        </div>
+
+        <div>
+            <input
+                    class="button-primary"
+                    id="wpvivid_start_export"
+                    type="submit"
+                    name="<?php echo esc_attr($post_type); ?>"
+                    value="<?php esc_attr_e('Export and Download', 'wpvivid-backuprestore'); ?>"
+                    style="pointer-events: none; opacity: 0.4;"
+            >
+        </div>
+        <?php
+
+        $html = ob_get_clean();
+
+        echo wp_json_encode(array(
+            'result' => 'success',
+            'html'   => $html,
+        ));
+
         die();
     }
 
     public function export_post_step3()
     {
-        check_ajax_referer( 'wpvivid_ajax', 'nonce' );
-        $check=current_user_can('manage_options');
-        $check=apply_filters('wpvivid_ajax_check_security',$check);
-        if(!$check)
+        $this->check_ajax_security();
+
+        if (
+            !isset($_POST['post_type']) ||
+            !is_string($_POST['post_type']) ||
+            !isset($_POST['all']) ||
+            !is_string($_POST['all'])
+        )
         {
+            echo wp_json_encode(array(
+                'result' => 'failed',
+                'error'  => __('Invalid export request.', 'wpvivid-backuprestore'),
+            ));
             die();
         }
-        $post_type=sanitize_text_field($_POST['post_type']);
-        $post_all=sanitize_text_field($_POST['all']);
-        if(isset($post_type)&&isset($post_all))
+
+        $post_type = sanitize_key(wp_unslash($_POST['post_type']));
+        if (!in_array($post_type, array('post', 'page'), true))
         {
-            $old_post_ids=array();
-            if(isset($_POST['post_ids']))
+            echo wp_json_encode(array(
+                'result' => 'failed',
+                'error'  => __('Invalid post type.', 'wpvivid-backuprestore'),
+            ));
+            die();
+        }
+
+        $post_all = sanitize_key(wp_unslash($_POST['all']));
+        if (!in_array($post_all, array('all', 'list'), true))
+        {
+            echo wp_json_encode(array(
+                'result' => 'failed',
+                'error'  => __('Invalid export selection.', 'wpvivid-backuprestore'),
+            ));
+            die();
+        }
+
+        $old_post_ids = array();
+
+        if (isset($_POST['post_ids']))
+        {
+            if (!is_array($_POST['post_ids']))
             {
-                $old_post_ids=$_POST['post_ids'];
-                $old_post_ids = array_map( 'sanitize_key', $old_post_ids );
-                $old_post_ids=(int)$old_post_ids;
+                echo wp_json_encode(array(
+                    'result' => 'failed',
+                    'error'  => __('Invalid post ids.', 'wpvivid-backuprestore'),
+                ));
+                die();
             }
 
-            $list_cache=get_option('wpvivid_list_cache',array());
-
-            foreach ($old_post_ids as $id=>$checked)
+            foreach ($_POST['post_ids'] as $id => $checked)
             {
-                if(isset($list_cache[$id]))
+                if (
+                    !is_int($id) &&
+                    !(is_string($id) && ctype_digit($id))
+                )
                 {
-                    $list_cache[$id]['checked']=$checked;
+                    echo wp_json_encode(array(
+                        'result' => 'failed',
+                        'error'  => __('Invalid post id.', 'wpvivid-backuprestore'),
+                    ));
+                    die();
                 }
-            }
-            WPvivid_Setting::update_option('wpvivid_list_cache',$list_cache);
 
-            $post_count=0;
+                $id = absint($id);
 
-            if($post_all=='all')
-            {
-                global $wpdb;
-
-                $where      = $wpdb->prepare( "post_type =%s", $post_type);
-                $posts_ids = $wpdb->get_col( "SELECT ID FROM {$wpdb->posts} WHERE $where" );
-                $post_count=sizeof($posts_ids);
-            }
-            else
-            {
-                foreach ($list_cache as $id=>$item)
+                if ($id < 1)
                 {
-                    if($item['checked'])
-                        $post_count++;
+                    echo wp_json_encode(array(
+                        'result' => 'failed',
+                        'error'  => __('Invalid post id.', 'wpvivid-backuprestore'),
+                    ));
+                    die();
                 }
+
+                if (
+                    !is_int($checked) &&
+                    !(is_string($checked) && ctype_digit($checked))
+                )
+                {
+                    echo wp_json_encode(array(
+                        'result' => 'failed',
+                        'error'  => __('Invalid post selection.', 'wpvivid-backuprestore'),
+                    ));
+                    die();
+                }
+
+                $checked = (int)$checked;
+
+                if (!in_array($checked, array(0, 1), true))
+                {
+                    echo wp_json_encode(array(
+                        'result' => 'failed',
+                        'error'  => __('Invalid post selection.', 'wpvivid-backuprestore'),
+                    ));
+                    die();
+                }
+
+                $old_post_ids[$id] = $checked;
             }
+        }
 
-            ob_start();
-            ?>
-            <h2>Export post type:<strong><?php echo esc_html($post_type)?></strong></h2>
-            <p>
-                Selected post(s):<?php echo esc_html($post_count)?>
-            </p>
-            <p class="submit">
-                <input type="button" class="button button-primary wpvivid-export-step3-prev" value="Prev step">
-                <input type="button" class="button button-primary" id="wpvivid_start_export" value="Start Export">
-            </p>
-            <?php
+        $list_cache = get_option('wpvivid_list_cache', array());
 
-            $html = ob_get_clean();
-            $ret['result']='success';
-            $ret['html']=$html;
+        foreach ($old_post_ids as $id => $checked)
+        {
+            if (isset($list_cache[$id]))
+            {
+                $list_cache[$id]['checked'] = $checked;
+            }
+        }
+
+        WPvivid_Setting::update_option('wpvivid_list_cache', $list_cache);
+
+        $post_count = 0;
+
+        if ($post_all == 'all')
+        {
+            global $wpdb;
+
+            $where = $wpdb->prepare("post_type =%s", $post_type);
+            $posts_ids = $wpdb->get_col("SELECT ID FROM {$wpdb->posts} WHERE $where");
+            $post_count = sizeof($posts_ids);
         }
         else
         {
-            $ret['result']='failed';
-            $ret['error']='not set post type';
+            foreach ($list_cache as $id => $item)
+            {
+                if ($item['checked'])
+                {
+                    $post_count++;
+                }
+            }
         }
+
+        ob_start();
+        ?>
+        <h2>Export post type:<strong><?php echo esc_html($post_type); ?></strong></h2>
+        <p>
+            Selected post(s):<?php echo esc_html($post_count); ?>
+        </p>
+        <p class="submit">
+            <input type="button" class="button button-primary wpvivid-export-step3-prev" value="Prev step">
+            <input type="button" class="button button-primary" id="wpvivid_start_export" value="Start Export">
+        </p>
+        <?php
+
+        $html = ob_get_clean();
+
+        $ret['result'] = 'success';
+        $ret['html'] = $html;
+
         echo wp_json_encode($ret);
         die();
     }
@@ -930,117 +1163,236 @@ class WPvivid_Export_Import
 
     public function get_list()
     {
-        check_ajax_referer( 'wpvivid_ajax', 'nonce' );
-        $check=current_user_can('manage_options');
-        $check=apply_filters('wpvivid_ajax_check_security',$check);
-        if(!$check)
+        $this->check_ajax_security();
+
+        if (
+            !isset($_POST['post_type']) ||
+            !is_string($_POST['post_type']) ||
+            !isset($_POST['authors']) ||
+            !is_string($_POST['authors']) ||
+            !isset($_POST['post_start_date']) ||
+            !is_string($_POST['post_start_date']) ||
+            !isset($_POST['post_end_date']) ||
+            !is_string($_POST['post_end_date'])
+        )
         {
+            echo wp_json_encode(array(
+                'result' => 'failed',
+                'error'  => __('Invalid post query.', 'wpvivid-backuprestore'),
+            ));
             die();
         }
 
-        if(!isset($_POST['post_type'])&&!isset($_POST['cat'])&&!isset($_POST['authors'])&&!isset($_POST['post_start_date'])&&!isset($_POST['post_end_date']))
+        $post_type = sanitize_key(wp_unslash($_POST['post_type']));
+        if (!in_array($post_type, array('post', 'page'), true))
         {
+            echo wp_json_encode(array(
+                'result' => 'failed',
+                'error'  => __('Invalid post type.', 'wpvivid-backuprestore'),
+            ));
             die();
         }
 
-        if(isset($_POST['post_ids'])&&!empty($_POST['post_ids']))
+        $cat = 0;
+
+        if (isset($_POST['cat']))
         {
-            $select_post_id=$_POST['post_ids'];
-            $select_post_id = array_map( 'sanitize_key', $select_post_id );
-            $select_post_id=(int)$select_post_id;
-        }
-        else
-        {
-            $select_post_id=0;
+            if (!is_string($_POST['cat']) || !ctype_digit($_POST['cat']))
+            {
+                echo wp_json_encode(array(
+                    'result' => 'failed',
+                    'error'  => __('Invalid category.', 'wpvivid-backuprestore'),
+                ));
+                die();
+            }
+
+            $cat = absint($_POST['cat']);
         }
 
-        if(isset($_POST['post_title'])&&!empty($_POST['post_title']))
+        if (!ctype_digit($_POST['authors']))
         {
-            $post_title=sanitize_text_field($_POST['post_title']);
+            echo wp_json_encode(array(
+                'result' => 'failed',
+                'error'  => __('Invalid author.', 'wpvivid-backuprestore'),
+            ));
+            die();
         }
-        else
+
+        $author = absint($_POST['authors']);
+
+        $post_start_date = sanitize_text_field(wp_unslash($_POST['post_start_date']));
+        $post_end_date   = sanitize_text_field(wp_unslash($_POST['post_end_date']));
+
+        foreach (array($post_start_date, $post_end_date) as $date)
         {
-            $post_title='';
-        }
-        //
+            if ($date === '0' || $date === '')
+            {
+                continue;
+            }
 
-        $post_type=sanitize_text_field($_POST['post_type']);
-        if(isset($_POST['cat'])) {
-            $cat = (int)sanitize_key($_POST['cat']);
-        }
-        $author=(int)sanitize_key($_POST['authors']);
-        $post_start_date=sanitize_text_field($_POST['post_start_date']);
-        $post_end_date=sanitize_text_field($_POST['post_end_date']);
+            if (preg_match('/\A([0-9]{4})-([0-9]{2})\z/', $date, $matches) !== 1)
+            {
+                echo wp_json_encode(array(
+                    'result' => 'failed',
+                    'error'  => __('Invalid post date.', 'wpvivid-backuprestore'),
+                ));
+                die();
+            }
 
+            $year  = (int)$matches[1];
+            $month = (int)$matches[2];
+
+            if ($year < 1 || $month < 1 || $month > 12)
+            {
+                echo wp_json_encode(array(
+                    'result' => 'failed',
+                    'error'  => __('Invalid post date.', 'wpvivid-backuprestore'),
+                ));
+                die();
+            }
+        }
+
+        $select_post_id = 0;
+
+        if (isset($_POST['post_ids']) && $_POST['post_ids'] !== '')
+        {
+            if (
+                !is_string($_POST['post_ids']) ||
+                !ctype_digit($_POST['post_ids'])
+            )
+            {
+                echo wp_json_encode(array(
+                    'result' => 'failed',
+                    'error'  => __('Invalid post id.', 'wpvivid-backuprestore'),
+                ));
+                die();
+            }
+
+            $select_post_id = absint($_POST['post_ids']);
+
+            if ($select_post_id < 1)
+            {
+                echo wp_json_encode(array(
+                    'result' => 'failed',
+                    'error'  => __('Invalid post id.', 'wpvivid-backuprestore'),
+                ));
+                die();
+            }
+        }
+
+        $post_title = '';
+
+        if (isset($_POST['post_title']) && $_POST['post_title'] !== '')
+        {
+            if (!is_string($_POST['post_title']))
+            {
+                echo wp_json_encode(array(
+                    'result' => 'failed',
+                    'error'  => __('Invalid post title.', 'wpvivid-backuprestore'),
+                ));
+                die();
+            }
+
+            $post_title = sanitize_text_field(wp_unslash($_POST['post_title']));
+        }
 
         global $wpdb;
 
-        $where      = $wpdb->prepare( "post_type =%s", $post_type);
+        $where = $wpdb->prepare("post_type =%s", $post_type);
         $join = '';
-        if(isset($_POST['cat'])) {
-            if ($term = term_exists($cat, 'category')) {
+
+        if (isset($_POST['cat']))
+        {
+            if ($term = term_exists($cat, 'category'))
+            {
                 $join = "INNER JOIN {$wpdb->term_relationships} ON ({$wpdb->posts}.ID = {$wpdb->term_relationships}.object_id)";
-                $where .= $wpdb->prepare(" AND {$wpdb->term_relationships}.term_taxonomy_id = %d", $term['term_taxonomy_id']);
+                $where .= $wpdb->prepare(
+                    " AND {$wpdb->term_relationships}.term_taxonomy_id = %d",
+                    $term['term_taxonomy_id']
+                );
             }
         }
-        if ( $author )
+
+        if ($author)
         {
-            $where .= $wpdb->prepare( " AND {$wpdb->posts}.post_author = %d", $author );
-        }
-        if ( $post_start_date )
-        {
-            $where .= $wpdb->prepare( " AND {$wpdb->posts}.post_date >= %s", gmdate( 'Y-m-d', strtotime( $post_start_date ) ) );
-        }
-        if ( $post_end_date )
-        {
-            $where .= $wpdb->prepare( " AND {$wpdb->posts}.post_date < %s", gmdate( 'Y-m-d', strtotime( '+1 month', strtotime( $post_end_date ) ) ) );
-        }
-        if($select_post_id)
-        {
-            $where .= $wpdb->prepare( " AND {$wpdb->posts}.ID = %d", $select_post_id );
-        }
-        if($post_title)
-        {
-            $where .= $wpdb->prepare( " AND {$wpdb->posts}.post_title LIKE %s", '%' . $wpdb->esc_like($post_title) . '%' );
+            $where .= $wpdb->prepare(
+                " AND {$wpdb->posts}.post_author = %d",
+                $author
+            );
         }
 
-        $posts_ids = $wpdb->get_col( "SELECT ID FROM {$wpdb->posts} $join WHERE $where" );
+        if ($post_start_date)
+        {
+            $where .= $wpdb->prepare(
+                " AND {$wpdb->posts}.post_date >= %s",
+                gmdate('Y-m-d', strtotime($post_start_date))
+            );
+        }
+
+        if ($post_end_date)
+        {
+            $where .= $wpdb->prepare(
+                " AND {$wpdb->posts}.post_date < %s",
+                gmdate('Y-m-d', strtotime('+1 month', strtotime($post_end_date)))
+            );
+        }
+
+        if ($select_post_id)
+        {
+            $where .= $wpdb->prepare(
+                " AND {$wpdb->posts}.ID = %d",
+                $select_post_id
+            );
+        }
+
+        if ($post_title)
+        {
+            $where .= $wpdb->prepare(
+                " AND {$wpdb->posts}.post_title LIKE %s",
+                '%' . $wpdb->esc_like($post_title) . '%'
+            );
+        }
+
+        $posts_ids = $wpdb->get_col(
+            "SELECT ID FROM {$wpdb->posts} $join WHERE $where"
+        );
 
         asort($posts_ids);
 
-        $list_cache=array();
+        $list_cache = array();
+
         foreach ($posts_ids as $id)
         {
-            $post_id['id']=$id;
-            $post_id['checked']=0;
-            $list_cache[$id]=$post_id;
+            $post_id['id'] = $id;
+            $post_id['checked'] = 0;
+            $list_cache[$id] = $post_id;
         }
-        WPvivid_Setting::update_option('wpvivid_list_cache',$list_cache);
-        $page=1;
 
-        $arg['screen']=$post_type;
+        WPvivid_Setting::update_option('wpvivid_list_cache', $list_cache);
+
+        $page = 1;
+
+        $arg['screen'] = $post_type;
+
         $myListTable = new WPvivid_Post_List($arg);
-        $myListTable->set_post_ids($list_cache,$page);
+        $myListTable->set_post_ids($list_cache, $page);
         $myListTable->prepare_items();
+
         ob_start();
         $myListTable->display();
         $rows = ob_get_clean();
-        $ret['result']='success';
-        $ret['rows']=$rows;
-        echo wp_json_encode($ret);
 
+        $ret['result'] = 'success';
+        $ret['rows'] = $rows;
+
+        echo wp_json_encode($ret);
         die();
     }
 
     public function get_export_list()
     {
-        check_ajax_referer( 'wpvivid_ajax', 'nonce' );
-        $check=current_user_can('manage_options');
-        $check=apply_filters('wpvivid_ajax_check_security',$check);
-        if(!$check)
-        {
-            die();
-        }
+        $this->check_ajax_security();
+
         $list = get_option('wpvivid_export_list',array());
         $display_list=new WPvivid_Export_List();
         $display_list->set_parent('wpvivid_import_list');
@@ -1058,37 +1410,135 @@ class WPvivid_Export_Import
 
     public function get_list_page()
     {
-        check_ajax_referer( 'wpvivid_ajax', 'nonce' );
-        $check=current_user_can('manage_options');
-        $check=apply_filters('wpvivid_ajax_check_security',$check);
-        if(!$check)
+        $this->check_ajax_security();
+
+        if (
+            !isset($_POST['post_type']) ||
+            !is_string($_POST['post_type']) ||
+            !isset($_POST['page']) ||
+            !is_string($_POST['page'])
+        )
         {
+            echo wp_json_encode(array(
+                'result' => 'failed',
+                'error'  => __('Invalid list request.', 'wpvivid-backuprestore'),
+            ));
             die();
         }
 
-        if(!isset($_POST['post_type'])&&!isset($_POST['page']))
+        $post_type = sanitize_key(wp_unslash($_POST['post_type']));
+
+        if (!in_array($post_type, array('post', 'page'), true))
         {
+            echo wp_json_encode(array(
+                'result' => 'failed',
+                'error'  => __('Invalid post type.', 'wpvivid-backuprestore'),
+            ));
             die();
         }
 
-        $list_cache=get_option('wpvivid_list_cache',array());
+        $page = sanitize_key(wp_unslash($_POST['page']));
 
-        WPvivid_Setting::update_option('wpvivid_list_cache',$list_cache);
+        if (
+            $page !== 'first' &&
+            $page !== 'last' &&
+            !ctype_digit($page)
+        )
+        {
+            echo wp_json_encode(array(
+                'result' => 'failed',
+                'error'  => __('Invalid page.', 'wpvivid-backuprestore'),
+            ));
+            die();
+        }
 
-        $page=sanitize_key($_POST['page']);
+        if (ctype_digit($page) && (int)$page < 1)
+        {
+            echo wp_json_encode(array(
+                'result' => 'failed',
+                'error'  => __('Invalid page.', 'wpvivid-backuprestore'),
+            ));
+            die();
+        }
 
-        $post_type=sanitize_text_field($_POST['post_type']);
-        $arg['screen']=$post_type;
+        if (isset($_POST['post_ids']))
+        {
+            if (!is_array($_POST['post_ids']))
+            {
+                echo wp_json_encode(array(
+                    'result' => 'failed',
+                    'error'  => __('Invalid post ids.', 'wpvivid-backuprestore'),
+                ));
+                die();
+            }
+
+            foreach ($_POST['post_ids'] as $id => $checked)
+            {
+                if (
+                    !is_int($id) &&
+                    !(is_string($id) && ctype_digit($id))
+                )
+                {
+                    echo wp_json_encode(array(
+                        'result' => 'failed',
+                        'error'  => __('Invalid post id.', 'wpvivid-backuprestore'),
+                    ));
+                    die();
+                }
+
+                $id = absint($id);
+
+                if ($id < 1)
+                {
+                    echo wp_json_encode(array(
+                        'result' => 'failed',
+                        'error'  => __('Invalid post id.', 'wpvivid-backuprestore'),
+                    ));
+                    die();
+                }
+
+                if (
+                    !is_int($checked) &&
+                    !(is_string($checked) && ctype_digit($checked))
+                )
+                {
+                    echo wp_json_encode(array(
+                        'result' => 'failed',
+                        'error'  => __('Invalid post selection.', 'wpvivid-backuprestore'),
+                    ));
+                    die();
+                }
+
+                $checked = (int)$checked;
+
+                if (!in_array($checked, array(0, 1), true))
+                {
+                    echo wp_json_encode(array(
+                        'result' => 'failed',
+                        'error'  => __('Invalid post selection.', 'wpvivid-backuprestore'),
+                    ));
+                    die();
+                }
+            }
+        }
+
+        $list_cache = get_option('wpvivid_list_cache', array());
+
+        WPvivid_Setting::update_option('wpvivid_list_cache', $list_cache);
+
+        $arg['screen'] = $post_type;
 
         $myListTable = new WPvivid_Post_List($arg);
-        $myListTable->set_post_ids($list_cache,$page);
+        $myListTable->set_post_ids($list_cache, $page);
         $myListTable->prepare_items();
+
         ob_start();
         $myListTable->display();
         $rows = ob_get_clean();
 
-        $ret['result']='success';
-        $ret['rows']=$rows;
+        $ret['result'] = 'success';
+        $ret['rows'] = $rows;
+
         echo wp_json_encode($ret);
         die();
     }
@@ -1126,107 +1576,225 @@ class WPvivid_Export_Import
 
     public function prepare_export_post()
     {
-        check_ajax_referer( 'wpvivid_ajax', 'nonce' );
-        $check=current_user_can('manage_options');
-        $check=apply_filters('wpvivid_ajax_check_security',$check);
-        if(!$check)
+        $this->check_ajax_security();
+
+        if (!isset($_POST['post_type']) || !isset($_POST['export_data']))
         {
+            echo wp_json_encode(array(
+                'result' => 'failed',
+                'error'  => __('Invalid export request.', 'wpvivid-backuprestore'),
+            ));
             die();
         }
-        if(isset($_POST['post_type'])&&isset($_POST['export_data']))
+
+        if (!is_string($_POST['post_type']) || !is_string($_POST['export_data']))
         {
-            $post_type   = sanitize_text_field($_POST['post_type']);
-            $json_export = sanitize_text_field($_POST['export_data']);
-            $json_export = stripslashes($json_export);
-            $export_data = json_decode($json_export, true);
-
-            $post_ids=array();
-            $posts_ids=array();
-            if (is_array($export_data) && isset($export_data['post_ids']) && is_array($export_data['post_ids']))
-            {
-                $post_ids = $export_data['post_ids'];
-            }
-            foreach ($post_ids as $id => $checked)
-            {
-                if (!$checked)
-                {
-                    continue;
-                }
-
-                if (!is_int($id) && !(is_string($id) && ctype_digit($id)))
-                {
-                    $ret['result'] = 'failed';
-                    $ret['error']  = __('Invalid post id', 'wpvivid-backuprestore');
-                    echo wp_json_encode($ret);
-                    die();
-                }
-
-                $id = absint($id);
-
-                if ($id < 1)
-                {
-                    $ret['result'] = 'failed';
-                    $ret['error']  = __('Invalid post id', 'wpvivid-backuprestore');
-                    echo wp_json_encode($ret);
-                    die();
-                }
-
-                $posts_ids[] = $id;
-            }
-            $posts_ids = array_values(array_unique($posts_ids));
-
-            if(empty($posts_ids))
-            {
-                $ret['result']='failed';
-                $ret['error']=__('Empty post id', 'wpvivid-backuprestore');
-                echo wp_json_encode($ret);
-                die();
-            }
-            if(WPvivid_Exporter_taskmanager::is_tasks_running())
-            {
-                $ret['result']='failed';
-                $ret['error']=__('A task is already running. Please wait until the running task is complete, and try again.', 'wpvivid-backuprestore');
-                echo wp_json_encode($ret);
-                die();
-            }
-
-            $export_task=new WPvivid_Exporter_task();
-
-            $options['post_ids']=$posts_ids;
-            $options['post_type']=$post_type;
-            $options['post_comment']=$export_data['post_comment'];
-
-            $ret=$export_task->new_backup_task($options);
-            echo wp_json_encode($ret);
+            echo wp_json_encode(array(
+                'result' => 'failed',
+                'error'  => __('Invalid export request.', 'wpvivid-backuprestore'),
+            ));
+            die();
         }
+
+        $post_type = sanitize_key(wp_unslash($_POST['post_type']));
+        if (!in_array($post_type, array('post', 'page'), true))
+        {
+            echo wp_json_encode(array(
+                'result' => 'failed',
+                'error'  => __('Invalid post type.', 'wpvivid-backuprestore'),
+            ));
+            die();
+        }
+
+        $json_export = wp_unslash($_POST['export_data']);
+        $export_data = json_decode($json_export, true);
+
+        if (
+            json_last_error() !== JSON_ERROR_NONE ||
+            !is_array($export_data)
+        )
+        {
+            echo wp_json_encode(array(
+                'result' => 'failed',
+                'error'  => __('Invalid export data.', 'wpvivid-backuprestore'),
+            ));
+            die();
+        }
+
+        if (
+            !isset($export_data['post_ids']) ||
+            !is_array($export_data['post_ids'])
+        )
+        {
+            echo wp_json_encode(array(
+                'result' => 'failed',
+                'error'  => __('Invalid post ids.', 'wpvivid-backuprestore'),
+            ));
+            die();
+        }
+
+        $posts_ids = array();
+
+        foreach ($export_data['post_ids'] as $id => $checked)
+        {
+            if (
+                !is_int($checked) &&
+                !(is_string($checked) && ctype_digit($checked))
+            )
+            {
+                echo wp_json_encode(array(
+                    'result' => 'failed',
+                    'error'  => __('Invalid post selection.', 'wpvivid-backuprestore'),
+                ));
+                die();
+            }
+
+            $checked = (int)$checked;
+
+            if (!in_array($checked, array(0, 1), true))
+            {
+                echo wp_json_encode(array(
+                    'result' => 'failed',
+                    'error'  => __('Invalid post selection.', 'wpvivid-backuprestore'),
+                ));
+                die();
+            }
+
+            if ($checked === 0)
+            {
+                continue;
+            }
+
+            if (
+                !is_int($id) &&
+                !(is_string($id) && ctype_digit($id))
+            )
+            {
+                echo wp_json_encode(array(
+                    'result' => 'failed',
+                    'error'  => __('Invalid post id.', 'wpvivid-backuprestore'),
+                ));
+                die();
+            }
+
+            $id = absint($id);
+
+            if ($id < 1)
+            {
+                echo wp_json_encode(array(
+                    'result' => 'failed',
+                    'error'  => __('Invalid post id.', 'wpvivid-backuprestore'),
+                ));
+                die();
+            }
+
+            $posts_ids[] = $id;
+        }
+
+        $posts_ids = array_values(array_unique($posts_ids));
+
+        if (empty($posts_ids))
+        {
+            echo wp_json_encode(array(
+                'result' => 'failed',
+                'error'  => __('Empty post id.', 'wpvivid-backuprestore'),
+            ));
+            die();
+        }
+
+        $post_comment = '';
+
+        if (isset($export_data['post_comment']))
+        {
+            if (!is_string($export_data['post_comment']))
+            {
+                echo wp_json_encode(array(
+                    'result' => 'failed',
+                    'error'  => __('Invalid export comment.', 'wpvivid-backuprestore'),
+                ));
+                die();
+            }
+
+            $post_comment = $export_data['post_comment'];
+
+            if (
+                $post_comment !== '' &&
+                preg_match('/\A[a-zA-Z0-9]+\z/', $post_comment) !== 1
+            )
+            {
+                echo wp_json_encode(array(
+                    'result' => 'failed',
+                    'error'  => __('Only letters and numbers are allowed in the export comment.', 'wpvivid-backuprestore'),
+                ));
+                die();
+            }
+
+            if (stripos($post_comment, 'wpvivid') !== false)
+            {
+                echo wp_json_encode(array(
+                    'result' => 'failed',
+                    'error'  => __('You can not use word "wpvivid" to comment the post.', 'wpvivid-backuprestore'),
+                ));
+                die();
+            }
+        }
+
+        if (WPvivid_Exporter_taskmanager::is_tasks_running())
+        {
+            echo wp_json_encode(array(
+                'result' => 'failed',
+                'error'  => __('A task is already running. Please wait until the running task is complete, and try again.', 'wpvivid-backuprestore'),
+            ));
+            die();
+        }
+
+        $export_task = new WPvivid_Exporter_task();
+
+        $options = array();
+        $options['post_ids'] = $posts_ids;
+        $options['post_type'] = $post_type;
+        $options['post_comment'] = $post_comment;
+
+        $ret = $export_task->new_backup_task($options);
+
+        echo wp_json_encode($ret);
         die();
     }
 
     public function export_now()
     {
-        check_ajax_referer( 'wpvivid_ajax', 'nonce' );
-        $check=current_user_can('manage_options');
-        $check=apply_filters('wpvivid_ajax_check_security',$check);
-        if(!$check)
-        {
-            die();
-        }
+        $this->check_ajax_security();
+
         try
         {
-            if (!isset($_POST['task_id']) || empty($_POST['task_id']) || !is_string($_POST['task_id']))
+            if (
+                !isset($_POST['task_id']) ||
+                !is_string($_POST['task_id'])
+            )
             {
                 $ret['result'] = 'failed';
                 $ret['error'] = __('Error occurred while parsing the request data. Please try to run export task again.', 'wpvivid-backuprestore');
+
                 echo wp_json_encode($ret);
                 die();
             }
 
-            $task_id = sanitize_key($_POST['task_id']);
+            $task_id = sanitize_key(wp_unslash($_POST['task_id']));
 
-            if(WPvivid_Exporter_taskmanager::is_tasks_running())
+            if ($task_id === '')
+            {
+                $ret['result'] = 'failed';
+                $ret['error'] = __('Error occurred while parsing the request data. Please try to run export task again.', 'wpvivid-backuprestore');
+
+                echo wp_json_encode($ret);
+                die();
+            }
+
+            if (WPvivid_Exporter_taskmanager::is_tasks_running())
             {
                 $ret['result'] = 'failed';
                 $ret['error'] = __('A task is already running. Please wait until the running task is complete, and try again.', 'wpvivid-backuprestore');
+
                 echo wp_json_encode($ret);
                 die();
             }
@@ -1237,9 +1805,14 @@ class WPvivid_Export_Import
         {
             $message = 'An exception has occurred. class: '.get_class($error).';msg: '.$error->getMessage().';code: '.$error->getCode().';line: '.$error->getLine().';in_file: '.$error->getFile().';';
             error_log($message);
-            echo wp_json_encode(array('result'=>'failed','error'=>$message));
+
+            echo wp_json_encode(array(
+                'result' => 'failed',
+                'error'  => $message,
+            ));
             die();
         }
+
         die();
     }
 
@@ -1341,17 +1914,35 @@ class WPvivid_Export_Import
 
     public function list_tasks()
     {
-        check_ajax_referer( 'wpvivid_ajax', 'nonce' );
-        $check=current_user_can('manage_options');
-        $check=apply_filters('wpvivid_ajax_check_security',$check);
-        if(!$check)
+        $this->check_ajax_security();
+
+        if (isset($_POST['task_id']))
         {
-            die();
+            if (!is_string($_POST['task_id']))
+            {
+                echo wp_json_encode(array(
+                    'result' => 'failed',
+                    'error'  => __('Invalid export task id.', 'wpvivid-backuprestore'),
+                ));
+                die();
+            }
+
+            $task_id = sanitize_key(wp_unslash($_POST['task_id']));
+
+            if ($task_id === '')
+            {
+                echo wp_json_encode(array(
+                    'result' => 'failed',
+                    'error'  => __('Invalid export task id.', 'wpvivid-backuprestore'),
+                ));
+                die();
+            }
         }
 
         $ret['result']='success';
         $ret['show']=false;
         $tasks=WPvivid_Exporter_taskmanager::get_tasks();
+
         foreach ($tasks as $task)
         {
             $this->task_monitor($task['id']);
@@ -1361,6 +1952,7 @@ class WPvivid_Export_Import
             $ret['show']=true;
             $ret['completed']=false;
             $ret['error']=false;
+
             if($status['str']=='running'||$status['str']=='no_responds'||$status['str']=='ready')
             {
                 $ret['continue']=1;
@@ -1374,6 +1966,7 @@ class WPvivid_Export_Import
             $progress=WPvivid_Exporter_taskmanager::get_backup_tasks_progress($task['id']);
             $ret['percent']='<div class="action-progress-bar-percent"  style="height:24px;width:'.(int)$progress['progress'].'%;"></div>';
             $ret['doing']=$task['data']['doing']='export';
+
             if($status['str']=='ready')
             {
                 $ret['doing']=__('Ready to export. Progress: 0%, running time: 0second.','wpvivid-backuprestore');
@@ -1394,26 +1987,31 @@ class WPvivid_Export_Import
             {
                 $file_name = $task['data']['export']['export_info']['file_name'];
                 $file_size = $task['data']['export']['export_info']['size'];
-                if($task['options']['backup_options']['post_type'] === 'post'){
+
+                if($task['options']['backup_options']['post_type'] === 'post')
+                {
                     $post_type = 'posts';
                 }
-                else{
+                else
+                {
                     $post_type = 'pages';
                 }
-                $msg = '<div style="margin-bottom: 10px;">The export task is completed and the automatic download starts. If the automatic download didn\'t run, please click <a style="cursor:pointer;" onclick="wpvivid_download_export(\''.$file_name.'\', \''.$file_size.'\');">here</a> to download.</div>';
-                $msg .= '<div style="margin-bottom: 10px;">The count of exported '.$post_type.': '.$task['data']['export']['export_info']['post_count'].'.</div>';
-                $msg .= '<div style="margin-bottom: 10px;">File name: '.$file_name.'.</div>';
-                $msg .= '<div>File size: '.size_format($file_size, 2).'.</div>';
+
+                $post_count = $task['data']['export']['export_info']['post_count'];
+
+                $msg = '<div style="margin-bottom: 10px;">The export task is completed and the automatic download starts. If the automatic download didn\'t run, please click <a href="#" class="wpvivid-download-export">here</a> to download.</div>';
+                $msg .= '<div style="margin-bottom: 10px;">The count of exported '.esc_html($post_type).': '.esc_html($post_count).'.</div>';
+                $msg .= '<div style="margin-bottom: 10px;">File name: '.esc_html($file_name).'.</div>';
+                $msg .= '<div>File size: '.esc_html(size_format($file_size, 2)).'.</div>';
 
                 $ret['completed']=true;
-                $ret['file_name'] = $file_name;
-                $ret['file_size'] = $file_size;
+                $ret['file_name']=$file_name;
+                $ret['file_size']=$file_size;
                 $ret['doing']=$msg;
             }
             else if($status['str']=='error')
             {
-                $ret['doing']='Export error: '.$task['status']['error'];
-                $ret['doing']='<div class="notice notice-error is-dismissible inline"><p>'.__('Export error:', 'wpvivid-backuprestore').' '.$task['status']['error'].'</p></div>';
+                $ret['doing']='<div class="notice notice-error is-dismissible inline"><p>' . esc_html__('Export error:', 'wpvivid-backuprestore') . ' ' . esc_html($task['status']['error']) . '</p></div>';
                 $ret['error']=true;
             }
 
@@ -1422,6 +2020,7 @@ class WPvivid_Export_Import
                 WPvivid_Exporter_taskmanager::delete_task($task['id']);
             }
         }
+
         echo wp_json_encode($ret);
         die();
     }
@@ -1468,13 +2067,7 @@ class WPvivid_Export_Import
 
     public function delete_export_list()
     {
-        check_ajax_referer( 'wpvivid_ajax', 'nonce' );
-        $check=current_user_can('manage_options');
-        $check=apply_filters('wpvivid_ajax_check_security',$check);
-        if(!$check)
-        {
-            die();
-        }
+        $this->check_ajax_security();
 
         if(isset($_POST['export_id']))
         {
@@ -1525,77 +2118,162 @@ class WPvivid_Export_Import
 
     public function wpvivid_download_export_backup()
     {
-        check_ajax_referer( 'wpvivid_ajax', 'nonce' );
-        $check=current_user_can('manage_options');
-        $check=apply_filters('wpvivid_ajax_check_security',$check);
-        if(!$check)
+        $this->check_ajax_security();
+
+        try
         {
-            die();
-        }
-        try{
-            if(isset($_REQUEST['file_name']) && !empty($_REQUEST['file_name']) && is_string($_REQUEST['file_name']) &&
-                isset($_REQUEST['file_size']) && !empty($_REQUEST['file_size']) && is_string($_REQUEST['file_size'])){
-                $file_name = sanitize_text_field($_REQUEST['file_name']);
-                $file_size = intval(sanitize_key($_REQUEST['file_size']));
-
-                $file_name = basename($file_name);
-
-                $path=WP_CONTENT_DIR.DIRECTORY_SEPARATOR.WPvivid_Setting::get_backupdir().DIRECTORY_SEPARATOR.WPVIVID_IMPORT_EXPORT_DIR.DIRECTORY_SEPARATOR.$file_name;
-                if (file_exists($path)) {
-                    if (session_id()) {
-                        session_write_close();
-                    }
-                    $size = filesize($path);
-                    if($size === $file_size) {
-                        if (!headers_sent()) {
-                            header('Content-Description: File Transfer');
-                            header('Content-Type: application/zip');
-                            header('Content-Disposition: attachment; filename="' . basename($path) . '"');
-                            header('Cache-Control: must-revalidate');
-                            header('Content-Length: ' . $size);
-                            header('Content-Transfer-Encoding: binary');
-                        }
-                        if ($size < 1024 * 1024 * 60) {
-                            ob_end_clean();
-                            readfile($path);
-                            exit;
-                        } else {
-                            ob_end_clean();
-                            $download_rate = 1024 * 10;
-                            $file = fopen($path, "r");
-                            while (!feof($file)) {
-                                @set_time_limit(20);
-                                // send the current file part to the browser
-                                print fread($file, round($download_rate * 1024));
-                                // flush the content to the browser
-                                flush();
-                                // sleep one second
-                                sleep(1);
-                            }
-                            fclose($file);
-                            exit;
-                        }
-                    }
-                    else{
-                        $admin_url = admin_url();
-                        echo '<a href="'.esc_url($admin_url).'admin.php?page=wpvivid-export-import">';
-                        esc_html_e('File size not match. please retry again.', 'wpvivid-backuprestore');
-                        echo '</a>';
-                        die();
-                    }
-                }
-
+            if (
+                !isset($_REQUEST['file_name']) ||
+                !is_string($_REQUEST['file_name']) ||
+                !isset($_REQUEST['file_size']) ||
+                !is_string($_REQUEST['file_size'])
+            )
+            {
                 $admin_url = admin_url();
+
                 echo '<a href="'.esc_url($admin_url).'admin.php?page=wpvivid-export-import">';
-                esc_html_e('File not found. Please retry again.', 'wpvivid-backuprestore');
+                esc_html_e('Invalid download request. Please retry again.', 'wpvivid-backuprestore');
                 echo '</a>';
                 die();
             }
+
+            $file_name = wp_unslash($_REQUEST['file_name']);
+
+            if (
+                $file_name === '' ||
+                $file_name === '.' ||
+                $file_name === '..' ||
+                strpos($file_name, "\0") !== false ||
+                strpos($file_name, '/') !== false ||
+                strpos($file_name, '\\') !== false ||
+                strpos($file_name, ':') !== false ||
+                basename($file_name) !== $file_name ||
+                validate_file($file_name) !== 0 ||
+                preg_match('/\A[a-zA-Z0-9._~-]+\.zip\z/i', $file_name) !== 1
+            )
+            {
+                $admin_url = admin_url();
+
+                echo '<a href="'.esc_url($admin_url).'admin.php?page=wpvivid-export-import">';
+                esc_html_e('Invalid file name. Please retry again.', 'wpvivid-backuprestore');
+                echo '</a>';
+                die();
+            }
+
+            if (
+                $_REQUEST['file_size'] === '' ||
+                !ctype_digit($_REQUEST['file_size'])
+            )
+            {
+                $admin_url = admin_url();
+
+                echo '<a href="'.esc_url($admin_url).'admin.php?page=wpvivid-export-import">';
+                esc_html_e('Invalid file size. Please retry again.', 'wpvivid-backuprestore');
+                echo '</a>';
+                die();
+            }
+
+            $file_size = (int)$_REQUEST['file_size'];
+
+            if ($file_size < 1)
+            {
+                $admin_url = admin_url();
+
+                echo '<a href="'.esc_url($admin_url).'admin.php?page=wpvivid-export-import">';
+                esc_html_e('Invalid file size. Please retry again.', 'wpvivid-backuprestore');
+                echo '</a>';
+                die();
+            }
+
+            $path =
+                WP_CONTENT_DIR .
+                DIRECTORY_SEPARATOR .
+                WPvivid_Setting::get_backupdir() .
+                DIRECTORY_SEPARATOR .
+                WPVIVID_IMPORT_EXPORT_DIR .
+                DIRECTORY_SEPARATOR .
+                $file_name;
+
+            if (file_exists($path))
+            {
+                if (session_id())
+                {
+                    session_write_close();
+                }
+
+                $size = filesize($path);
+
+                if ($size === $file_size)
+                {
+                    if (!headers_sent())
+                    {
+                        header('Content-Description: File Transfer');
+                        header('Content-Type: application/zip');
+                        header('Content-Disposition: attachment; filename="' . basename($path) . '"');
+                        header('Cache-Control: must-revalidate');
+                        header('Content-Length: ' . $size);
+                        header('Content-Transfer-Encoding: binary');
+                    }
+
+                    if ($size < 1024 * 1024 * 60)
+                    {
+                        ob_end_clean();
+                        readfile($path);
+                        exit;
+                    }
+                    else
+                    {
+                        ob_end_clean();
+
+                        $download_rate = 1024 * 10;
+                        $file = fopen($path, "r");
+
+                        while (!feof($file))
+                        {
+                            @set_time_limit(20);
+
+                            print fread(
+                                $file,
+                                round($download_rate * 1024)
+                            );
+
+                            flush();
+                            sleep(1);
+                        }
+
+                        fclose($file);
+                        exit;
+                    }
+                }
+                else
+                {
+                    $admin_url = admin_url();
+
+                    echo '<a href="'.esc_url($admin_url).'admin.php?page=wpvivid-export-import">';
+                    esc_html_e('File size not match. please retry again.', 'wpvivid-backuprestore');
+                    echo '</a>';
+                    die();
+                }
+            }
+
+            $admin_url = admin_url();
+
+            echo '<a href="'.esc_url($admin_url).'admin.php?page=wpvivid-export-import">';
+            esc_html_e('File not found. Please retry again.', 'wpvivid-backuprestore');
+            echo '</a>';
+            die();
         }
-        catch (Exception $error) {
+        catch (Exception $error)
+        {
             $message = 'An exception has occurred. class: '.get_class($error).';msg: '.$error->getMessage().';code: '.$error->getCode().';line: '.$error->getLine().';in_file: '.$error->getFile().';';
+
             error_log($message);
-            echo wp_json_encode(array('result'=>'failed','error'=>$message));
+
+            echo wp_json_encode(array(
+                'result' => 'failed',
+                'error'  => $message
+            ));
+
             die();
         }
     }
@@ -2222,23 +2900,43 @@ class WPvivid_Export_Import
 
     public function check_import_file()
     {
-        check_ajax_referer( 'wpvivid_ajax', 'nonce' );
-        $check=current_user_can('manage_options');
-        $check=apply_filters('wpvivid_ajax_check_security',$check);
-        if(!$check)
+        $this->check_ajax_security();
+
+        if (
+            !isset($_POST['file_name']) ||
+            !is_string($_POST['file_name'])
+        )
         {
+            echo wp_json_encode(array(
+                'result' => WPVIVID_FAILED,
+                'error'  => 'Failed to post file name.',
+            ));
             die();
         }
-        $file_name = sanitize_text_field($_POST['file_name']);
-        if(isset($file_name))
+
+        $file_name = wp_unslash($_POST['file_name']);
+
+        if (
+            $file_name === '' ||
+            $file_name === '.' ||
+            $file_name === '..' ||
+            strpos($file_name, "\0") !== false ||
+            strpos($file_name, '/') !== false ||
+            strpos($file_name, '\\') !== false ||
+            strpos($file_name, ':') !== false ||
+            basename($file_name) !== $file_name ||
+            validate_file($file_name) !== 0 ||
+            preg_match('/\A[a-zA-Z0-9._~-]+\.zip\z/i', $file_name) !== 1
+        )
         {
-            $ret = $this->wpvivid_check_import_file_name($file_name);
+            echo wp_json_encode(array(
+                'result' => WPVIVID_FAILED,
+                'error'  => 'Invalid import file name.',
+            ));
+            die();
         }
-        else
-        {
-            $ret['result']=WPVIVID_FAILED;
-            $ret['error']='Failed to post file name.';
-        }
+
+        $ret = $this->wpvivid_check_import_file_name($file_name);
 
         echo wp_json_encode($ret);
         die();
@@ -2252,67 +2950,218 @@ class WPvivid_Export_Import
 
     public function upload_import_files()
     {
-        check_ajax_referer( 'wpvivid_ajax', 'nonce' );
-        $check=current_user_can('manage_options');
-        $check=apply_filters('wpvivid_ajax_check_security',$check);
-        if(!$check)
+        $this->check_ajax_security();
+
+        if (
+            !isset($_POST['name']) ||
+            !is_string($_POST['name']) ||
+            !isset($_FILES['async-upload']) ||
+            !is_array($_FILES['async-upload'])
+        )
         {
+            echo wp_json_encode(array(
+                'result' => WPVIVID_FAILED,
+                'error'  => 'Invalid upload data.'
+            ));
             die();
         }
-        $options['test_form'] =true;
-        $options['action'] ='wpvivid_upload_import_files';
-        $options['test_type'] = false;
-        $options['ext'] = 'zip';
-        $options['type'] = 'application/zip';
+
+        $upload = $_FILES['async-upload'];
+
+        if (
+            !isset($upload['name'], $upload['tmp_name'], $upload['error']) ||
+            !is_string($upload['name']) ||
+            !is_string($upload['tmp_name']) ||
+            !is_int($upload['error']) ||
+            $upload['error'] !== UPLOAD_ERR_OK ||
+            !is_uploaded_file($upload['tmp_name'])
+        )
+        {
+            echo wp_json_encode(array(
+                'result' => WPVIVID_FAILED,
+                'error'  => 'Invalid uploaded file.'
+            ));
+            die();
+        }
+
+        $file_name = wp_unslash($_POST['name']);
+        $uploaded_name = $upload['name'];
+
+        if (
+            preg_match('/\A[a-zA-Z0-9._~-]+\.zip\z/i', $file_name) !== 1 ||
+            sanitize_file_name($file_name) !== $file_name
+        )
+        {
+            echo wp_json_encode(array(
+                'result' => WPVIVID_FAILED,
+                'error'  => 'Invalid import ZIP file name.'
+            ));
+            die();
+        }
+
+        $is_blob_chunk =
+            $uploaded_name === 'blob' &&
+            isset($_POST['chunks'], $_POST['chunk']);
+
+        if (
+            !$is_blob_chunk &&
+            (
+                preg_match('/\A[a-zA-Z0-9._~-]+\.zip\z/i', $uploaded_name) !== 1 ||
+                sanitize_file_name($uploaded_name) !== $uploaded_name
+            )
+        )
+        {
+            echo wp_json_encode(array(
+                'result' => WPVIVID_FAILED,
+                'error'  => 'Invalid uploaded ZIP file name.'
+            ));
+            die();
+        }
+
+        if (isset($_POST['chunks']) || isset($_POST['chunk']))
+        {
+            if (
+                !isset($_POST['chunks'], $_POST['chunk']) ||
+                !is_string($_POST['chunks']) ||
+                !is_string($_POST['chunk']) ||
+                !ctype_digit($_POST['chunks']) ||
+                !ctype_digit($_POST['chunk'])
+            )
+            {
+                echo wp_json_encode(array(
+                    'result' => WPVIVID_FAILED,
+                    'error'  => 'Invalid chunk data.'
+                ));
+                die();
+            }
+
+            $chunks = (int)$_POST['chunks'];
+            $chunk  = (int)$_POST['chunk'];
+
+            if (
+                $chunks < 1 ||
+                $chunks > 100000 ||
+                $chunk < 0 ||
+                $chunk >= $chunks
+            )
+            {
+                echo wp_json_encode(array(
+                    'result' => WPVIVID_FAILED,
+                    'error'  => 'Invalid chunk range.'
+                ));
+                die();
+            }
+        }
+
+        if ($is_blob_chunk)
+        {
+            $_FILES['async-upload']['name'] = $file_name;
+        }
+
+        $options = array(
+            'test_form' => true,
+            'action' => 'wpvivid_upload_import_files',
+            'test_type' => true,
+            'mimes' => array(
+                'zip' => 'application/zip'
+            )
+        );
+
         add_filter('upload_dir', array($this, 'upload_import_dir'));
 
-        $file_name=basename(sanitize_text_field($_POST['name']));
-        $validate = wp_check_filetype( $file_name );
-        if ( $validate['type'] == false )
-        {
-            echo wp_json_encode(array('result'=>WPVIVID_FAILED, 'error' => 'File type is not allowed.'));
-            die();
-        }
-
-        $status = wp_handle_upload($_FILES['async-upload'],$options);
+        $status = wp_handle_upload(
+            $_FILES['async-upload'],
+            $options
+        );
 
         remove_filter('upload_dir', array($this, 'upload_import_dir'));
+
         if (isset($status['error']))
         {
-            echo wp_json_encode(array('result'=>WPVIVID_FAILED, 'error' => $status['error']));
+            echo wp_json_encode(array(
+                'result' => WPVIVID_FAILED,
+                'error'  => $status['error']
+            ));
             exit;
         }
 
         if (isset($_POST['chunks']) && isset($_POST['chunk']))
         {
-            $chunks=sanitize_key($_POST['chunks']);
-            $chunk=sanitize_key($_POST['chunk']);
-            $path=WP_CONTENT_DIR.DIRECTORY_SEPARATOR.WPvivid_Setting::get_backupdir().DIRECTORY_SEPARATOR.WPVIVID_IMPORT_EXPORT_DIR.DIRECTORY_SEPARATOR;
-            rename($status['file'],$path.$file_name.'_'.$chunk.'.tmp');
-            $status['file'] = $path.$file_name.'_'.$chunk.'.tmp';
-            if($chunk == $chunks-1)
+            $chunks = (int)$_POST['chunks'];
+            $chunk  = (int)$_POST['chunk'];
+
+            $path =
+                WP_CONTENT_DIR .
+                DIRECTORY_SEPARATOR .
+                WPvivid_Setting::get_backupdir() .
+                DIRECTORY_SEPARATOR .
+                WPVIVID_IMPORT_EXPORT_DIR .
+                DIRECTORY_SEPARATOR;
+
+            $chunk_file = $path . $file_name . '_' . $chunk . '.tmp';
+
+            if (
+                is_link($chunk_file) ||
+                !@rename($status['file'], $chunk_file)
+            )
             {
-                $file_handle = fopen($path.$file_name, 'wb');
+                @wp_delete_file($status['file']);
+
+                echo wp_json_encode(array(
+                    'result' => WPVIVID_FAILED,
+                    'error'  => 'Failed to save the uploaded chunk.'
+                ));
+                die();
+            }
+
+            $status['file'] = $chunk_file;
+
+            if ($chunk == $chunks - 1)
+            {
+                if (is_link($path . $file_name))
+                {
+                    echo wp_json_encode(array(
+                        'result' => WPVIVID_FAILED,
+                        'error'  => 'Invalid import target.'
+                    ));
+                    die();
+                }
+
+                $file_handle = fopen($path . $file_name, 'wb');
+
                 if ($file_handle)
                 {
-                    for ($i=0; $i<$chunks; $i++)
+                    for ($i = 0; $i < $chunks; $i++)
                     {
-                        $chunks_handle=fopen($path.$file_name.'_'.$i.'.tmp','rb');
-                        if($chunks_handle)
+                        $chunks_handle = fopen(
+                            $path . $file_name . '_' . $i . '.tmp',
+                            'rb'
+                        );
+
+                        if ($chunks_handle)
                         {
-                            while ($line = fread($chunks_handle, 1048576*2))
+                            while ($line = fread($chunks_handle, 1048576 * 2))
                             {
                                 fwrite($file_handle, $line);
                             }
+
                             fclose($chunks_handle);
-                            @wp_delete_file($path.$file_name.'_'.$i.'.tmp');
+
+                            @wp_delete_file(
+                                $path . $file_name . '_' . $i . '.tmp'
+                            );
                         }
                     }
+
                     fclose($file_handle);
                 }
             }
         }
-        echo wp_json_encode(array('result'=>WPVIVID_SUCCESS));
+
+        echo wp_json_encode(array(
+            'result' => WPVIVID_SUCCESS
+        ));
+
         die();
     }
 
@@ -2320,92 +3169,136 @@ class WPvivid_Export_Import
     {
         try
         {
-            check_ajax_referer( 'wpvivid_ajax', 'nonce' );
-            $check=current_user_can('manage_options');
-            $check=apply_filters('wpvivid_ajax_check_security',$check);
-            if(!$check)
-            {
-                die();
-            }
+            $this->check_ajax_security();
 
-            $tasks=WPvivid_Impoter_taskmanager::get_tasks();
+            $tasks = WPvivid_Impoter_taskmanager::get_tasks();
+
             foreach ($tasks as $task)
             {
                 WPvivid_Impoter_taskmanager::get_task($task['id']);
+
                 $import_log = new WPvivid_import_data();
+
                 $ret['result'] = 'success';
-                $ret['status'] = WPvivid_Impoter_taskmanager::get_import_task_status($task['id']);
+                $ret['status'] =
+                    WPvivid_Impoter_taskmanager::get_import_task_status(
+                        $task['id']
+                    );
+
                 if ($ret['status'] === 'error')
                 {
-                    WPvivid_Impoter_taskmanager::delete_task($task['id']);
+                    WPvivid_Impoter_taskmanager::delete_task(
+                        $task['id']
+                    );
                 }
-                if($ret['status'] === 'completed')
+
+                if ($ret['status'] === 'completed')
                 {
-                    WPvivid_Impoter_taskmanager::delete_task($task['id']);
+                    WPvivid_Impoter_taskmanager::delete_task(
+                        $task['id']
+                    );
                 }
+
                 $ret['log'] = $import_log->get_log_content();
+
                 echo wp_json_encode($ret);
                 die();
             }
+
             $ret['result'] = 'success';
-            $ret['status'] ='wait';
-            $ret['log']='';
+            $ret['status'] = 'wait';
+            $ret['log'] = '';
+
             echo wp_json_encode($ret);
             die();
         }
-        catch (Exception $error) {
-            $message = 'An exception has occurred. class: '.get_class($error).';msg: '.$error->getMessage().';code: '.$error->getCode().';line: '.$error->getLine().';in_file: '.$error->getFile().';';
+        catch (Exception $error)
+        {
+            $message =
+                'An exception has occurred. class: ' .
+                get_class($error) .
+                ';msg: ' .
+                $error->getMessage() .
+                ';code: ' .
+                $error->getCode() .
+                ';line: ' .
+                $error->getLine() .
+                ';in_file: ' .
+                $error->getFile() .
+                ';';
+
             error_log($message);
-            echo wp_json_encode(array('result'=>'failed','error'=>$message));
+
+            echo wp_json_encode(array(
+                'result' => 'failed',
+                'error'  => $message
+            ));
+
             die();
         }
     }
 
     public function upload_import_file_complete()
     {
-        check_ajax_referer( 'wpvivid_ajax', 'nonce' );
-        $check=current_user_can('manage_options');
-        $check=apply_filters('wpvivid_ajax_check_security',$check);
-        if(!$check)
-        {
-            die();
-        }
+        $this->check_ajax_security();
 
-        $ret['html']=false;
+        $ret['html'] = false;
 
-        if (!isset($_POST['files']) || !is_string($_POST['files']))
+        if (
+            !isset($_POST['files']) ||
+            !is_string($_POST['files'])
+        )
         {
             $ret['result'] = WPVIVID_FAILED;
             $ret['error'] = 'Invalid files data.';
+
             echo wp_json_encode($ret);
             die();
         }
 
         $files_json = wp_unslash($_POST['files']);
         $files = json_decode($files_json, true);
-        if (json_last_error() !== JSON_ERROR_NONE || !is_array($files) || empty($files))
+
+        if (
+            json_last_error() !== JSON_ERROR_NONE ||
+            !is_array($files) ||
+            empty($files)
+        )
         {
             $ret['result'] = WPVIVID_FAILED;
             $ret['error'] = 'Failed to decode files.';
+
             echo wp_json_encode($ret);
             die();
         }
 
-        $path=WP_CONTENT_DIR.DIRECTORY_SEPARATOR.WPvivid_Setting::get_backupdir().DIRECTORY_SEPARATOR.WPVIVID_IMPORT_EXPORT_DIR.DIRECTORY_SEPARATOR;
+        $path =
+            WP_CONTENT_DIR .
+            DIRECTORY_SEPARATOR .
+            WPvivid_Setting::get_backupdir() .
+            DIRECTORY_SEPARATOR .
+            WPVIVID_IMPORT_EXPORT_DIR .
+            DIRECTORY_SEPARATOR;
 
         foreach ($files as $key => $file)
         {
-            if (!is_array($file) || !isset($file['name']) || !is_string($file['name']))
+            if (
+                !is_array($file) ||
+                !isset($file['name']) ||
+                !is_string($file['name'])
+            )
             {
                 $ret['result'] = WPVIVID_FAILED;
                 $ret['error'] = 'Invalid import file name.';
+
                 echo wp_json_encode($ret);
                 die();
             }
 
             $file_name = $file['name'];
 
-            if ($file_name === '' ||
+            if (
+                $file_name === '' ||
                 $file_name === '.' ||
                 $file_name === '..' ||
                 strpos($file_name, "\0") !== false ||
@@ -2414,10 +3307,12 @@ class WPvivid_Export_Import
                 strpos($file_name, ':') !== false ||
                 basename($file_name) !== $file_name ||
                 validate_file($file_name) !== 0 ||
-                preg_match('/\A[a-zA-Z0-9._~-]+\.zip\z/i', $file_name) !== 1)
+                preg_match('/\A[a-zA-Z0-9._~-]+\.zip\z/i', $file_name) !== 1
+            )
             {
                 $ret['result'] = WPVIVID_FAILED;
                 $ret['error'] = 'Invalid import file name.';
+
                 echo wp_json_encode($ret);
                 die();
             }
@@ -2425,42 +3320,70 @@ class WPvivid_Export_Import
             $files[$key]['name'] = $file_name;
         }
 
-        $data=array();
-        $check_result=true;
+        $data = array();
+        $check_result = true;
+
         foreach ($files as $file)
         {
-            $res=$this->check_is_import_file($path.$file['name']);
-            if($res['result'] =='success')
+            $res = $this->check_is_import_file(
+                $path . $file['name']
+            );
+
+            if ($res['result'] == 'success')
             {
                 $add_file = array();
+
                 $add_file['file_name'] = $file['name'];
-                $add_file['size'] = filesize($path.$file['name']);
+                $add_file['size'] = filesize($path . $file['name']);
                 $add_file['export_type'] = $res['export_type'];
-                $add_file['export_comment'] = isset($res['export_comment']) ? $res['export_comment'] : 'N/A';
-                $add_file['posts_count'] = isset($res['posts_count']) ? $res['posts_count'] : 0;
-                $add_file['media_size'] = size_format(isset($res['media_size']) ? $res['media_size'] : 0, 2);
-                $add_file['time'] = isset($res['time']) ? $res['time'] : time();
-                $data[]=$add_file;
+                $add_file['export_comment'] =
+                    isset($res['export_comment'])
+                        ? $res['export_comment']
+                        : 'N/A';
+                $add_file['posts_count'] =
+                    isset($res['posts_count'])
+                        ? $res['posts_count']
+                        : 0;
+                $add_file['media_size'] =
+                    size_format(
+                        isset($res['media_size'])
+                            ? $res['media_size']
+                            : 0,
+                        2
+                    );
+                $add_file['time'] =
+                    isset($res['time'])
+                        ? $res['time']
+                        : time();
+
+                $data[] = $add_file;
             }
             else
             {
-                $check_result=false;
+                $check_result = false;
             }
         }
 
-        if($check_result === true)
+        if ($check_result === true)
         {
-            $ret['result']=WPVIVID_SUCCESS;
-            $ret['data']=$data;
+            $ret['result'] = WPVIVID_SUCCESS;
+            $ret['data'] = $data;
         }
         else
         {
-            $ret['result']=WPVIVID_FAILED;
-            $ret['error']='Upload file failed.';
+            $ret['result'] = WPVIVID_FAILED;
+            $ret['error'] = 'Upload file failed.';
+
             foreach ($files as $file)
             {
-                $this->clean_tmp_files($path, $file['name']);
-                @wp_delete_file($path . $file['name']);
+                $this->clean_tmp_files(
+                    $path,
+                    $file['name']
+                );
+
+                @wp_delete_file(
+                    $path . $file['name']
+                );
             }
         }
 
@@ -2569,51 +3492,89 @@ class WPvivid_Export_Import
     public function calc_import_folder_size()
     {
         global $wpvivid_plugin;
-        check_ajax_referer( 'wpvivid_ajax', 'nonce' );
-        $check=current_user_can('manage_options');
-        $check=apply_filters('wpvivid_ajax_check_security',$check);
-        if(!$check)
-        {
-            die();
-        }
-        $path = WP_CONTENT_DIR.DIRECTORY_SEPARATOR.WPvivid_Setting::get_backupdir().DIRECTORY_SEPARATOR.WPVIVID_IMPORT_EXPORT_DIR.DIRECTORY_SEPARATOR;
+
+        $this->check_ajax_security();
+
+        $path =
+            WP_CONTENT_DIR .
+            DIRECTORY_SEPARATOR .
+            WPvivid_Setting::get_backupdir() .
+            DIRECTORY_SEPARATOR .
+            WPVIVID_IMPORT_EXPORT_DIR .
+            DIRECTORY_SEPARATOR;
+
         $bytes_total = 0;
+
         $path = realpath($path);
-        if($path!==false && $path!='' && file_exists($path))
+
+        if (
+            $path !== false &&
+            $path != '' &&
+            file_exists($path)
+        )
         {
-            foreach(new RecursiveIteratorIterator(new RecursiveDirectoryIterator($path, FilesystemIterator::SKIP_DOTS)) as $object){
+            foreach (
+                new RecursiveIteratorIterator(
+                    new RecursiveDirectoryIterator(
+                        $path,
+                        FilesystemIterator::SKIP_DOTS
+                    )
+                ) as $object
+            )
+            {
                 $bytes_total += $object->getSize();
             }
         }
+
         $ret['result'] = WPVIVID_SUCCESS;
-        $ret['size']   = $wpvivid_plugin->formatBytes($bytes_total);
+        $ret['size'] =
+            $wpvivid_plugin->formatBytes($bytes_total);
+
         echo wp_json_encode($ret);
         die();
     }
 
-    public function clean_import_folder(){
-        check_ajax_referer( 'wpvivid_ajax', 'nonce' );
-        $check=current_user_can('manage_options');
-        $check=apply_filters('wpvivid_ajax_check_security',$check);
-        if(!$check)
-        {
-            die();
-        }
-        $path = WP_CONTENT_DIR.DIRECTORY_SEPARATOR.WPvivid_Setting::get_backupdir().DIRECTORY_SEPARATOR.WPVIVID_IMPORT_EXPORT_DIR.DIRECTORY_SEPARATOR;
-        if(is_dir($path))
+    public function clean_import_folder()
+    {
+        $this->check_ajax_security();
+
+        $path =
+            WP_CONTENT_DIR .
+            DIRECTORY_SEPARATOR .
+            WPvivid_Setting::get_backupdir() .
+            DIRECTORY_SEPARATOR .
+            WPVIVID_IMPORT_EXPORT_DIR .
+            DIRECTORY_SEPARATOR;
+
+        if (is_dir($path))
         {
             $handler = opendir($path);
-            if($handler!==false)
+
+            if ($handler !== false)
             {
-                while (($filename = readdir($handler)) !== false){
-                    if ($filename != "." && $filename != ".."){
-                        if (is_dir($path  . $filename)) {
+                while (($filename = readdir($handler)) !== false)
+                {
+                    if (
+                        $filename != "." &&
+                        $filename != ".."
+                    )
+                    {
+                        if (is_dir($path . $filename))
+                        {
                             continue;
                         }
-                        else{
-                            $res=$this->check_is_import_file($path.$filename);
-                            if($res['result'] =='success'){
-                                @wp_delete_file($path.$filename);
+                        else
+                        {
+                            $res =
+                                $this->check_is_import_file(
+                                    $path . $filename
+                                );
+
+                            if ($res['result'] == 'success')
+                            {
+                                @wp_delete_file(
+                                    $path . $filename
+                                );
                             }
                         }
                     }
@@ -2622,30 +3583,55 @@ class WPvivid_Export_Import
         }
 
         $data = array();
-        WPvivid_Setting::update_option('wpvivid_import_list_cache', $data);
-        $page=1;
-        $display_list=new WPvivid_Export_List();
-        $display_list->set_parent('wpvivid_import_list');
+
+        WPvivid_Setting::update_option(
+            'wpvivid_import_list_cache',
+            $data
+        );
+
+        $page = 1;
+
+        $display_list = new WPvivid_Export_List();
+        $display_list->set_parent(
+            'wpvivid_import_list'
+        );
         $display_list->set_list($data, $page);
         $display_list->prepare_items();
+
         ob_start();
         $display_list->display();
         $html = ob_get_clean();
-        $ret['html']=$html;
-        $ret['data']=$data;
-        $ret['result']=WPVIVID_SUCCESS;
+
+        $ret['html'] = $html;
+        $ret['data'] = $data;
+        $ret['result'] = WPVIVID_SUCCESS;
 
         global $wpvivid_plugin;
+
         $bytes_total = 0;
         $path = realpath($path);
-        if($path!==false && $path!='' && file_exists($path))
+
+        if (
+            $path !== false &&
+            $path != '' &&
+            file_exists($path)
+        )
         {
-            foreach(new RecursiveIteratorIterator(new RecursiveDirectoryIterator($path, FilesystemIterator::SKIP_DOTS)) as $object)
+            foreach (
+                new RecursiveIteratorIterator(
+                    new RecursiveDirectoryIterator(
+                        $path,
+                        FilesystemIterator::SKIP_DOTS
+                    )
+                ) as $object
+            )
             {
                 $bytes_total += $object->getSize();
             }
         }
-        $ret['size'] = $wpvivid_plugin->formatBytes($bytes_total);
+
+        $ret['size'] =
+            $wpvivid_plugin->formatBytes($bytes_total);
 
         echo wp_json_encode($ret);
         die();
@@ -2653,22 +3639,24 @@ class WPvivid_Export_Import
 
     public function wpvivid_scan_import_folder()
     {
-        check_ajax_referer( 'wpvivid_ajax', 'nonce' );
-        $check=current_user_can('manage_options');
-        $check=apply_filters('wpvivid_ajax_check_security',$check);
-        if(!$check)
-        {
-            die();
-        }
+        $this->check_ajax_security();
 
-        $path=WP_CONTENT_DIR.DIRECTORY_SEPARATOR.WPvivid_Setting::get_backupdir().DIRECTORY_SEPARATOR.WPVIVID_IMPORT_EXPORT_DIR.DIRECTORY_SEPARATOR;
+        $path =
+            WP_CONTENT_DIR .
+            DIRECTORY_SEPARATOR .
+            WPvivid_Setting::get_backupdir() .
+            DIRECTORY_SEPARATOR .
+            WPVIVID_IMPORT_EXPORT_DIR .
+            DIRECTORY_SEPARATOR;
 
-        $data=array();
+        $data = array();
         $count = 0;
-        if(is_dir($path))
+
+        if (is_dir($path))
         {
             $handler = opendir($path);
-            if($handler!==false)
+
+            if ($handler !== false)
             {
                 while (($filename = readdir($handler)) !== false)
                 {
@@ -2676,83 +3664,201 @@ class WPvivid_Export_Import
                     {
                         $count++;
 
-                        if (is_dir($path  . $filename))
+                        if (is_dir($path . $filename))
                         {
                             continue;
                         }
-                        else {
+                        else
+                        {
+                            $res = $this->check_is_import_file(
+                                $path . $filename
+                            );
 
-                            $res=$this->check_is_import_file($path.$filename);
-                            if($res['result'] =='success')
+                            if ($res['result'] == 'success')
                             {
-                                $add_file['file_name']=$filename;
-                                $add_file['size']=filesize($path.$filename);
-                                $add_file['export_type']=$res['export_type'];
-                                $add_file['export_comment']=$res['export_comment'];
-                                $add_file['posts_count']=$res['posts_count'];
-                                $add_file['media_size']=size_format($res['media_size'],2);
-                                $add_file['time']=$res['time'];
-                                $data[$this->get_file_id($filename)]=$add_file;
+                                $add_file['file_name'] = $filename;
+                                $add_file['size'] =
+                                    filesize($path . $filename);
+                                $add_file['export_type'] =
+                                    $res['export_type'];
+                                $add_file['export_comment'] =
+                                    $res['export_comment'];
+                                $add_file['posts_count'] =
+                                    $res['posts_count'];
+                                $add_file['media_size'] =
+                                    size_format(
+                                        $res['media_size'],
+                                        2
+                                    );
+                                $add_file['time'] =
+                                    $res['time'];
+
+                                $data[
+                                $this->get_file_id($filename)
+                                ] = $add_file;
                             }
                         }
                     }
                 }
-                if($handler)
+
+                if ($handler)
+                {
                     @closedir($handler);
+                }
             }
         }
-        else{
+        else
+        {
             global $wpvivid_plugin;
-            $wpvivid_plugin->wpvivid_log=new WPvivid_Log();
-            $id=uniqid('wpvivid-');
-            $wpvivid_plugin->wpvivid_log->CreateLogFile($id.'_scan','no_folder','scan');
+
+            $wpvivid_plugin->wpvivid_log =
+                new WPvivid_Log();
+
+            $id = uniqid('wpvivid-');
+
+            $wpvivid_plugin->wpvivid_log->CreateLogFile(
+                $id . '_scan',
+                'no_folder',
+                'scan'
+            );
+
             $wpvivid_plugin->wpvivid_log->WriteLogHander();
-            $wpvivid_plugin->wpvivid_log->WriteLog('Failed to get local storage directory.','notice');
-            $ret['result']=WPVIVID_FAILED;
-            $ret['error']='Failed to get local storage directory.';
+
+            $wpvivid_plugin->wpvivid_log->WriteLog(
+                'Failed to get local storage directory.',
+                'notice'
+            );
+
+            $ret['result'] = WPVIVID_FAILED;
+            $ret['error'] =
+                'Failed to get local storage directory.';
         }
-        WPvivid_Setting::update_option('wpvivid_import_list_cache', $data);
-        $page=1;
-        $display_list=new WPvivid_Export_List();
+
+        WPvivid_Setting::update_option(
+            'wpvivid_import_list_cache',
+            $data
+        );
+
+        $page = 1;
+
+        $display_list = new WPvivid_Export_List();
         $display_list->set_parent('wpvivid_import_list');
         $display_list->set_list($data, $page);
         $display_list->prepare_items();
+
         ob_start();
         $display_list->display();
         $html = ob_get_clean();
-        $ret['html']=$html;
-        $ret['data']=$data;
-        $ret['result']=WPVIVID_SUCCESS;
+
+        $ret['html'] = $html;
+        $ret['data'] = $data;
+        $ret['result'] = WPVIVID_SUCCESS;
+
         echo wp_json_encode($ret);
         die();
     }
 
-    public function get_import_list_page(){
-        check_ajax_referer( 'wpvivid_ajax', 'nonce' );
-        $check=current_user_can('manage_options');
-        $check=apply_filters('wpvivid_ajax_check_security',$check);
-        if(!$check)
+    public function get_import_list_page()
+    {
+        $this->check_ajax_security();
+
+        if (
+            !isset($_POST['page']) ||
+            !is_string($_POST['page'])
+        )
         {
+            echo wp_json_encode(array(
+                'result' => 'failed',
+                'error'  => __('Invalid list request.', 'wpvivid-backuprestore'),
+            ));
             die();
         }
-        if(!isset($_POST['page']))
+
+        $page = sanitize_key(wp_unslash($_POST['page']));
+
+        if (
+            $page !== 'first' &&
+            $page !== 'last' &&
+            !ctype_digit($page)
+        )
         {
+            echo wp_json_encode(array(
+                'result' => 'failed',
+                'error'  => __('Invalid page.', 'wpvivid-backuprestore'),
+            ));
             die();
         }
-        $page=sanitize_key($_POST['page']);
+
+        if (ctype_digit($page) && (int)$page < 1)
+        {
+            echo wp_json_encode(array(
+                'result' => 'failed',
+                'error'  => __('Invalid page.', 'wpvivid-backuprestore'),
+            ));
+            die();
+        }
+
+        if (isset($_POST['post_ids']))
+        {
+            if (!is_array($_POST['post_ids']))
+            {
+                echo wp_json_encode(array(
+                    'result' => 'failed',
+                    'error'  => __('Invalid export ids.', 'wpvivid-backuprestore'),
+                ));
+                die();
+            }
+
+            foreach ($_POST['post_ids'] as $id => $checked)
+            {
+                if (!is_string($id) && !is_int($id))
+                {
+                    echo wp_json_encode(array(
+                        'result' => 'failed',
+                        'error'  => __('Invalid export id.', 'wpvivid-backuprestore'),
+                    ));
+                    die();
+                }
+
+                if (
+                    !is_int($checked) &&
+                    !(is_string($checked) && ctype_digit($checked))
+                )
+                {
+                    echo wp_json_encode(array(
+                        'result' => 'failed',
+                        'error'  => __('Invalid export selection.', 'wpvivid-backuprestore'),
+                    ));
+                    die();
+                }
+
+                $checked = (int)$checked;
+
+                if (!in_array($checked, array(0, 1), true))
+                {
+                    echo wp_json_encode(array(
+                        'result' => 'failed',
+                        'error'  => __('Invalid export selection.', 'wpvivid-backuprestore'),
+                    ));
+                    die();
+                }
+            }
+        }
 
         $backups = get_option('wpvivid_import_list_cache');
 
-        $display_list=new WPvivid_Export_List();
+        $display_list = new WPvivid_Export_List();
         $display_list->set_parent('wpvivid_import_list');
         $display_list->set_list($backups, $page);
         $display_list->prepare_items();
+
         ob_start();
         $display_list->display();
         $html = ob_get_clean();
 
-        $ret['result']='success';
-        $ret['rows']=$html;
+        $ret['result'] = 'success';
+        $ret['rows'] = $html;
+
         echo wp_json_encode($ret);
         die();
     }
@@ -2816,56 +3922,147 @@ class WPvivid_Export_Import
     public function start_import()
     {
         global $wpvivid_plugin;
-        check_ajax_referer( 'wpvivid_ajax', 'nonce' );
-        $check=current_user_can('manage_options');
-        $check=apply_filters('wpvivid_ajax_check_security',$check);
-        if(!$check)
-        {
-            die();
-        }
+
+        $this->check_ajax_security();
+
         $this->end_shutdown_function = false;
         register_shutdown_function(array($this,'deal_import_shutdown_error'));
+
         try
         {
-            $file_name=sanitize_text_field($_POST['file_name']);
-            if (isset($file_name) && !empty($file_name) && is_string($file_name))
+            if (
+                !isset($_POST['file_name']) ||
+                !is_string($_POST['file_name'])
+            )
             {
-                $files=array();
-                $options=array();
-                $files[]=$file_name;
-                $options['user']=0;
-                if(isset($_POST['user']))
+                echo wp_json_encode(array(
+                    'result' => 'failed',
+                    'error'  => __('Invalid import file name.', 'wpvivid-backuprestore'),
+                ));
+                die();
+            }
+
+            $file_name = wp_unslash($_POST['file_name']);
+
+            if (
+                $file_name === '' ||
+                $file_name === '.' ||
+                $file_name === '..' ||
+                strpos($file_name, "\0") !== false ||
+                strpos($file_name, '/') !== false ||
+                strpos($file_name, '\\') !== false ||
+                strpos($file_name, ':') !== false ||
+                basename($file_name) !== $file_name ||
+                validate_file($file_name) !== 0 ||
+                preg_match('/\A[a-zA-Z0-9._~-]+\.zip\z/i', $file_name) !== 1
+            )
+            {
+                echo wp_json_encode(array(
+                    'result' => 'failed',
+                    'error'  => __('Invalid import file name.', 'wpvivid-backuprestore'),
+                ));
+                die();
+            }
+
+            $options = array();
+            $files = array();
+
+            $files[] = $file_name;
+
+            $options['user'] = 0;
+
+            if (isset($_POST['user']))
+            {
+                if (
+                    !is_string($_POST['user']) ||
+                    !ctype_digit($_POST['user'])
+                )
                 {
-                    $options['user']=sanitize_text_field($_POST['user']);
-                }
-                $options['update_exist']=0;
-                if(isset($_POST['update_exist']))
-                {
-                    $options['update_exist']=sanitize_text_field($_POST['update_exist']);
+                    echo wp_json_encode(array(
+                        'result' => 'failed',
+                        'error'  => __('Invalid user.', 'wpvivid-backuprestore'),
+                    ));
+                    die();
                 }
 
-                $task_id=$this->get_file_id($file_name);
-                WPvivid_Impoter_taskmanager::new_task($task_id, $files,$options);
-                $import_log = new WPvivid_import_data();
-                $import_log->wpvivid_create_import_log();
-                $import_log->wpvivid_write_import_log('Start importing', 'notice');
-                $this->flush($task_id);
-                WPvivid_Impoter_taskmanager::update_import_task_status($task_id, 'running', true);
-                $importer = new WPvivid_media_importer();
-                $ret = $importer->import($task_id);
-                echo wp_json_encode($ret);
+                $options['user'] = absint($_POST['user']);
             }
+
+            $options['update_exist'] = 0;
+
+            if (isset($_POST['update_exist']))
+            {
+                if (
+                    !is_string($_POST['update_exist']) ||
+                    !ctype_digit($_POST['update_exist'])
+                )
+                {
+                    echo wp_json_encode(array(
+                        'result' => 'failed',
+                        'error'  => __('Invalid import option.', 'wpvivid-backuprestore'),
+                    ));
+                    die();
+                }
+
+                $update_exist = (int)$_POST['update_exist'];
+
+                if (!in_array($update_exist, array(0, 1), true))
+                {
+                    echo wp_json_encode(array(
+                        'result' => 'failed',
+                        'error'  => __('Invalid import option.', 'wpvivid-backuprestore'),
+                    ));
+                    die();
+                }
+
+                $options['update_exist'] = $update_exist;
+            }
+
+            $task_id = $this->get_file_id($file_name);
+
+            WPvivid_Impoter_taskmanager::new_task(
+                $task_id,
+                $files,
+                $options
+            );
+
+            $import_log = new WPvivid_import_data();
+            $import_log->wpvivid_create_import_log();
+            $import_log->wpvivid_write_import_log('Start importing', 'notice');
+
+            $this->flush($task_id);
+
+            WPvivid_Impoter_taskmanager::update_import_task_status(
+                $task_id,
+                'running',
+                true
+            );
+
+            $importer = new WPvivid_media_importer();
+            $ret = $importer->import($task_id);
+
+            echo wp_json_encode($ret);
         }
         catch (Exception $error)
         {
             $message = 'An error has occurred. class:'.get_class($error).';msg:'.$error->getMessage().';code:'.$error->getCode().';line:'.$error->getLine().';in_file:'.$error->getFile().';';
             error_log($message);
-            WPvivid_Exporter_taskmanager::update_backup_task_status($task_id,false,'error',false,false,$message);
+
+            WPvivid_Exporter_taskmanager::update_backup_task_status(
+                $task_id,
+                false,
+                'error',
+                false,
+                false,
+                $message
+            );
+
             $wpvivid_plugin->wpvivid_log->WriteLog($message,'error');
-            $this->end_shutdown_function=true;
+            $this->end_shutdown_function = true;
             die();
         }
-        $this->end_shutdown_function=true;
+
+        $this->end_shutdown_function = true;
         die();
     }
 

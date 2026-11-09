@@ -726,6 +726,8 @@ class WPvivid_Staging_Copy_DB
         $new_db=$this->get_db_instance(true);
         $old_db=$this->get_db_instance();
 
+        $wpvivid_plugin->staging->authorize_staging_table($this->task->get_id(), $new_table_name);
+
         $query = $old_db->prepare( 'SHOW TABLES LIKE %s', $new_db->esc_like( $new_table_name ) );
 
         if ( $new_db->get_var( $query ) == $new_table_name )
@@ -1099,6 +1101,55 @@ class WPvivid_Staging_Copy_DB
         return $ret;
     }
 
+    private function is_safe_serialized_value($value)
+    {
+        if (!is_array($value))
+        {
+            return is_scalar($value) || is_null($value);
+        }
+
+        $has_recursion = false;
+        set_error_handler(function ($errno, $message) use (&$has_recursion)
+        {
+            $has_recursion = true;
+            return true;
+        }, E_WARNING);
+
+        try
+        {
+            count($value, COUNT_RECURSIVE);
+        }
+        catch (Throwable $error)
+        {
+            restore_error_handler();
+            throw $error;
+        }
+        restore_error_handler();
+
+        if ($has_recursion)
+        {
+            return false;
+        }
+
+        $pending = array($value);
+        while (!empty($pending))
+        {
+            $current = array_pop($pending);
+            foreach ($current as $item)
+            {
+                if (is_array($item))
+                {
+                    $pending[] = $item;
+                }
+                elseif (!is_scalar($item) && !is_null($item))
+                {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
     public function replace_row_data($old_data)
     {
         $unserialize_data = @unserialize($old_data, array('allowed_classes' => false));
@@ -1108,6 +1159,10 @@ class WPvivid_Staging_Copy_DB
         }
         else
         {
+            if (!$this->is_safe_serialized_value($unserialize_data))
+            {
+                return $old_data;
+            }
             $old_data=$this->replace_serialize_data($unserialize_data);
             $old_data=serialize($old_data);
         }
@@ -1119,6 +1174,10 @@ class WPvivid_Staging_Copy_DB
     {
         if(is_serialized( $data ) && ( $serialize_data = @unserialize( $data, array('allowed_classes' => false) ) ) !== false)
         {
+            if (!$this->is_safe_serialized_value($serialize_data))
+            {
+                return $data;
+            }
             $data=$this->replace_serialize_data($serialize_data,true);
         }
         else if(is_array($data))

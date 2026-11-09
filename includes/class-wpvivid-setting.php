@@ -5,6 +5,175 @@ if (!defined('WPVIVID_PLUGIN_DIR')){
 }
 class WPvivid_Setting
 {
+    /**
+     * Validate a single directory name and resolve it under a trusted base.
+     *
+     * @throws \Exception If the directory name or resolved path is invalid.
+     */
+    public static function validate_child_directory($base_dir, $name)
+    {
+        if (!is_string($name) ||
+            $name === '' ||
+            $name === '.' ||
+            $name === '..' ||
+            preg_match('/[\x00-\x1F\x7F\/\\\\:]/', $name) ||
+            preg_match('/[. ]$/', $name) ||
+            preg_match('/[\x00-\x1F\x7F\/\\\\:*?"<>|]/', $name))
+        {
+            throw new Exception('Invalid directory name.');
+        }
+
+        $base = realpath($base_dir);
+        if ($base === false || !is_dir($base))
+        {
+            throw new Exception('The base directory does not exist.');
+        }
+
+        $target = $base . DIRECTORY_SEPARATOR . $name;
+
+        // Reject symbolic links, including broken links.
+        if (is_link($target))
+        {
+            throw new Exception('Symbolic links are not allowed for this directory.');
+        }
+
+        if (file_exists($target))
+        {
+            $resolved = realpath($target);
+            if ($resolved === false || !is_dir($resolved))
+            {
+                throw new Exception('The target is not a valid directory.');
+            }
+
+            $parent = wp_normalize_path(dirname($resolved));
+            $expected_parent = wp_normalize_path($base);
+
+            if (DIRECTORY_SEPARATOR === '\\')
+            {
+                $parent = strtolower($parent);
+                $expected_parent = strtolower($expected_parent);
+            }
+
+            if ($parent !== $expected_parent)
+            {
+                throw new Exception('The directory is outside the allowed location.');
+            }
+
+            $target = $resolved;
+        }
+
+        return $target;
+    }
+
+    /**
+     * Resolve a relative directory inside wp-content without creating it.
+     * Validate every component, including existing parent directories.
+     *
+     * @throws \Exception
+     */
+    public static function validate_content_directory($relative_path)
+    {
+        if (!is_string($relative_path) || $relative_path === '' ||
+            preg_match('/[\x00-\x1F\x7F:]/', $relative_path))
+        {
+            throw new Exception('Invalid log directory.');
+        }
+
+        // Existing Windows settings use backslashes as directory separators.
+        $parts = explode('/', str_replace('\\', '/', $relative_path));
+        foreach ($parts as $part)
+        {
+            if ($part === '' || $part === '.' || $part === '..' ||
+                preg_match('/[. ]$/', $part) || preg_match('/[\x00-\x1F\x7F\/\\\\:*?"<>|]/', $part))
+            {
+                throw new Exception('Invalid log directory.');
+            }
+        }
+
+        $path = realpath(WP_CONTENT_DIR);
+        if ($path === false || !is_dir($path))
+        {
+            throw new Exception('The content directory does not exist.');
+        }
+
+        foreach ($parts as $part)
+        {
+            $parent = $path;
+            $path .= DIRECTORY_SEPARATOR . $part;
+            if (is_link($path))
+            {
+                throw new Exception('Symbolic links are not allowed for this directory.');
+            }
+            if (file_exists($path))
+            {
+                $resolved = realpath($path);
+                if ($resolved === false || !is_dir($resolved))
+                {
+                    throw new Exception('The target is not a valid directory.');
+                }
+                $actual_parent = wp_normalize_path(dirname($resolved));
+                $expected_parent = wp_normalize_path($parent);
+                if (DIRECTORY_SEPARATOR === '\\')
+                {
+                    $actual_parent = strtolower($actual_parent);
+                    $expected_parent = strtolower($expected_parent);
+                }
+                if ($actual_parent !== $expected_parent)
+                {
+                    throw new Exception('The directory is outside the allowed location.');
+                }
+                $path = $resolved;
+            }
+        }
+
+        return $path;
+    }
+
+    /**
+     * Validate the stored log location at the point of use.
+     *
+     * @throws \Exception
+     */
+    public static function get_log_directory()
+    {
+        $options = self::get_option('wpvivid_common_setting');
+        if (!is_array($options))
+        {
+            throw new Exception('Invalid log directory settings.');
+        }
+        $location = array_key_exists('log_save_location', $options)
+            ? $options['log_save_location'] : WPVIVID_DEFAULT_LOG_DIR;
+        $path = self::validate_content_directory($location);
+
+        if (!is_dir($path))
+        {
+            if (!@mkdir($path, 0755, true) && !is_dir($path))
+            {
+                throw new Exception('Failed to create the log directory.');
+            }
+            $path = self::validate_content_directory($location);
+            $handle = @fopen($path . DIRECTORY_SEPARATOR . '.htaccess', 'x');
+            if ($handle === false)
+            {
+                throw new Exception('Failed to protect the log directory.');
+            }
+            $text = "<IfModule mod_rewrite.c>\r\nRewriteEngine On\r\nRewriteRule .* - [F,L]\r\n</IfModule>";
+            $written = fwrite($handle, $text);
+            fclose($handle);
+            if ($written === false || $written !== strlen($text))
+            {
+                throw new Exception('Failed to write log directory protection.');
+            }
+        }
+        if (!array_key_exists('log_save_location', $options))
+        {
+            $options['log_save_location'] = $location;
+            self::update_option('wpvivid_common_setting', $options);
+        }
+
+        return $path . DIRECTORY_SEPARATOR;
+    }
+
     public static function init_option()
     {
         $ret=self::get_option('wpvivid_email_setting');
@@ -185,31 +354,61 @@ class WPvivid_Setting
         return $ret;
     }
 
+    /**
+     * Get the validated relative backup directory name.
+     *
+     * @return string
+     * @throws Exception
+     */
     public static function get_backupdir()
     {
-        $dir=self::get_option('wpvivid_local_setting');
+        $dir = self::get_option('wpvivid_local_setting');
 
-        if(!isset($dir['path']))
+        if (!is_array($dir) || !isset($dir['path']))
         {
-            $dir=self::set_default_local_option();
+            $dir = self::set_default_local_option();
         }
-        if(!is_dir(WP_CONTENT_DIR.DIRECTORY_SEPARATOR.$dir['path']))
+
+        $path = self::validate_child_directory(
+            WP_CONTENT_DIR,
+            $dir['path']
+        );
+
+        if (!is_dir($path))
         {
-            @mkdir(WP_CONTENT_DIR.DIRECTORY_SEPARATOR.$dir['path'],0777,true);
-            //@fopen(WP_CONTENT_DIR.DIRECTORY_SEPARATOR.$dir['path'].DIRECTORY_SEPARATOR.'index.html', 'x');
-            $tempfile=@fopen(WP_CONTENT_DIR.DIRECTORY_SEPARATOR.$dir['path'].DIRECTORY_SEPARATOR.'.htaccess', 'x');
-            if($tempfile)
+            if (!@mkdir($path, 0755, true) && !is_dir($path))
             {
-                //$text="deny from all";
-                $text="<IfModule mod_rewrite.c>\r\nRewriteEngine On\r\nRewriteRule .* - [F,L]\r\n</IfModule>";
-                fwrite($tempfile,$text );
-                fclose($tempfile);
-            }
-            else
-            {
-                return false;
+                throw new Exception('Failed to create the backup directory.');
             }
 
+            // Verify the created directory before writing into it.
+            $path = self::validate_child_directory(
+                WP_CONTENT_DIR,
+                $dir['path']
+            );
+
+            $tempfile = @fopen(
+                $path . DIRECTORY_SEPARATOR . '.htaccess',
+                'x'
+            );
+
+            if ($tempfile === false)
+            {
+                throw new Exception('Failed to protect the backup directory.');
+            }
+
+            $text = "<IfModule mod_rewrite.c>\r\n"
+                . "RewriteEngine On\r\n"
+                . "RewriteRule .* - [F,L]\r\n"
+                . "</IfModule>";
+
+            $written = fwrite($tempfile, $text);
+            fclose($tempfile);
+
+            if ($written === false || $written !== strlen($text))
+            {
+                throw new Exception('Failed to write backup directory protection.');
+            }
         }
 
         return $dir['path'];
@@ -589,6 +788,29 @@ class WPvivid_Setting
 
     public static function import_json_to_setting($json)
     {
+        // Validate all imported directory settings before changing any option.
+        if (!isset($json['data']) || !is_array($json['data']))
+        {
+            throw new Exception('Invalid settings data.');
+        }
+        foreach (array('wpvivid_local_setting', 'wpvivid_common_setting') as $name)
+        {
+            if (array_key_exists($name, $json['data']) && !is_array($json['data'][$name]))
+            {
+                throw new Exception('Invalid directory settings.');
+            }
+        }
+        if (isset($json['data']['wpvivid_local_setting']) &&
+            array_key_exists('path', $json['data']['wpvivid_local_setting']))
+        {
+            self::validate_child_directory(WP_CONTENT_DIR, $json['data']['wpvivid_local_setting']['path']);
+        }
+        if (isset($json['data']['wpvivid_common_setting']) &&
+            array_key_exists('log_save_location', $json['data']['wpvivid_common_setting']))
+        {
+            self::validate_content_directory($json['data']['wpvivid_common_setting']['log_save_location']);
+        }
+
         wp_cache_delete('notoptions', 'options');
         wp_cache_delete('alloptions', 'options');
         foreach ($json['data'] as $option_name=>$option)

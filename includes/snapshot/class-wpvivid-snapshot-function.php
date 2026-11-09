@@ -14,6 +14,23 @@ class WPvivid_Snapshot_Function_Ex
         $this->options=new WPvivid_Snapshot_Option_Ex();
     }
 
+    private function is_valid_snapshot_id($snapshot_id)
+    {
+        if (!is_string($snapshot_id) ||
+            preg_match('/\Awp[0-9a-f]{6}\z/', $snapshot_id) !== 1)
+        {
+            return false;
+        }
+
+        $snapshots = $this->options->get_option('wpvivid_snapshot');
+
+        return is_array($snapshots) &&
+            isset($snapshots[$snapshot_id]) &&
+            is_array($snapshots[$snapshot_id]) &&
+            isset($snapshots[$snapshot_id]['id']) &&
+            $snapshots[$snapshot_id]['id'] === $snapshot_id;
+    }
+
     public function check_snapshot_retention($types = array('manual','merge','dev'))
     {
         $snapshots=$this->options->get_option('wpvivid_snapshot');
@@ -485,6 +502,14 @@ class WPvivid_Snapshot_Function_Ex
     {
         global $wpdb;
 
+        if (!$this->is_valid_snapshot_id($snapshot_id))
+        {
+            return array(
+                'result' => 'failed',
+                'error' => 'Invalid snapshot ID.'
+            );
+        }
+
         $tables = $wpdb->get_results('SHOW TABLE STATUS');
 
         //$exclude_tables[]=$wpdb->prefix.'wpvivid_log';
@@ -619,7 +644,29 @@ class WPvivid_Snapshot_Function_Ex
     {
         global $wpdb;
 
-        $tables = $wpdb->get_col($wpdb->prepare('SHOW TABLES LIKE %s', array($snapshot_id . '%')));
+        if (!$this->is_valid_snapshot_id($snapshot_id))
+        {
+            return array(
+                'result' => 'failed',
+                'error' => 'Invalid snapshot ID.'
+            );
+        }
+
+        $tables = $wpdb->get_col(
+            $wpdb->prepare(
+                'SHOW TABLES LIKE %s',
+                $wpdb->esc_like($snapshot_id) . '%'
+            )
+        );
+
+        if (!is_array($tables))
+        {
+            return array(
+                'result' => 'failed',
+                'error' => 'Failed to retrieve snapshot tables.'
+            );
+        }
+
         foreach ($tables as $table)
         {
             $wpdb->query('DROP TABLE IF EXISTS `' . $table.'`');

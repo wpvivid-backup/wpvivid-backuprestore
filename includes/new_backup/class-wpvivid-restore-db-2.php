@@ -1224,12 +1224,156 @@ class WPvivid_Restore_DB_2
         return $ret;
     }
 
-    private function create_table($query,&$current_old_table,$sub_task)
+    // Rewrite only the target table identifier, never SQL data or comments.
+    private function rewrite_table_identifier($query, $table_name, $new_table_name)
+    {
+        if ($table_name === '' || $table_name === $new_table_name)
+        {
+            return $query;
+        }
+        $pattern = '/^\s*(?:\/\*!\d*\s*)?(?:INSERT\s+INTO|CREATE\s+TABLE(?:\s+IF\s+NOT\s+EXISTS)?|LOCK\s+TABLES|DROP\s+TABLE(?:\s+IF\s+EXISTS)?|ALTER\s+TABLE)\s+(`(?:``|[^`])+`|[^\s(;`]+)/i';
+        if (preg_match($pattern, $query, $matches, PREG_OFFSET_CAPTURE))
+        {
+            $identifier = $matches[1][0];
+            $name = str_replace('``', '`', trim($identifier, '`'));
+            if ($name === $table_name)
+            {
+                $replacement = '`'.str_replace('`', '``', $new_table_name).'`';
+                $query = substr_replace($query, $replacement, $matches[1][1], strlen($identifier));
+                return $query;
+            }
+        }
+        return $query;
+    }
+
+    private function wpvivid_escape_sql_value($value)
+    {
+        return str_replace("'", "''", $value);
+    }
+
+    private function wpvivid_escape_identifier($identifier)
+    {
+        return str_replace('`', '``', $identifier);
+    }
+
+    private function foreign_key_constraint_exists($constraint_name)
+    {
+        $constraint_name = $this->wpvivid_escape_sql_value($constraint_name);
+        $sql = "SELECT CONSTRAINT_NAME FROM information_schema.TABLE_CONSTRAINTS " .
+            "WHERE CONSTRAINT_SCHEMA = DATABASE() " .
+            "AND CONSTRAINT_TYPE = 'FOREIGN KEY' " .
+            "AND CONSTRAINT_NAME = '{$constraint_name}' LIMIT 1";
+
+        $result = $this->db_method->query($sql, ARRAY_A);
+        if ($result === false) {
+            if ($this->log) {
+                $this->log->WriteLog('Failed to check existing foreign key constraint name. Will use a temporary constraint name. Error: ' . $this->db_method->get_last_error(), 'notice');
+            }
+            return true;
+        }
+
+        return !empty($result);
+    }
+
+    private function generate_temp_foreign_key_constraint_name($temp_prefix, $constraint_name, $child_table, $referenced_table)
+    {
+        $new_constraint_name = $temp_prefix . $constraint_name;
+
+        if (strlen($new_constraint_name) <= 64) {
+            return $new_constraint_name;
+        }
+
+        return 'fk_' . substr(md5($temp_prefix . '|' . $constraint_name . '|' . $child_table . '|' . $referenced_table), 0, 32);
+    }
+
+    private function record_temp_foreign_key_constraint(&$sub_task, $original_constraint_name, $temp_constraint_name, $child_table, $child_columns, $referenced_table, $referenced_columns, $on_delete, $on_update)
+    {
+        if (!isset($sub_task['exec_sql']['temp_foreign_key_constraints']) || !is_array($sub_task['exec_sql']['temp_foreign_key_constraints'])) {
+            $sub_task['exec_sql']['temp_foreign_key_constraints'] = array();
+        }
+
+        $key = strtolower($child_table . '|' . $temp_constraint_name . '|' . $original_constraint_name);
+        $sub_task['exec_sql']['temp_foreign_key_constraints'][$key] = array(
+            'original_constraint_name' => $original_constraint_name,
+            'temp_constraint_name'     => $temp_constraint_name,
+            'child_table'              => $child_table,
+            'child_columns'            => $child_columns,
+            'referenced_table'         => $referenced_table,
+            'referenced_columns'       => $referenced_columns,
+            'on_delete'                => $on_delete,
+            'on_update'                => $on_update,
+        );
+    }
+
+    private function rewrite_create_table_foreign_keys_for_temp($query, &$sub_task, $child_table = '')
+    {
+        $temp_prefix = $this->temp_new_prefix;
+        $pattern = <<<'REGEX'
+~(?:'(?:''|\\.|[^'\\])*'|"(?:""|\\.|[^"\\])*"|`(?:``|[^`])*`|/\*[\s\S]*?\*/|--[^\r\n]*|\#[^\r\n]*)(*SKIP)(*F)|\b(?:CONSTRAINT\s+(`(?:``|[^`])+`|[a-zA-Z0-9_$]+)\s+)?FOREIGN\s+KEY\s*\(([^)]+)\)\s+REFERENCES\s+(`(?:``|[^`])+`|[a-zA-Z0-9_$]+)\s*\(([^)]+)\)((?:\s+ON\s+(?:DELETE|UPDATE)\s+(?:RESTRICT|CASCADE|SET\s+NULL|NO\s+ACTION))*)~i
+REGEX;
+        return preg_replace_callback($pattern, function ($m) use ($temp_prefix, &$sub_task, $child_table)
+        {
+            $child_columns = trim($m[2]);
+            $referenced_table = str_replace('``', '`', trim($m[3], '`'));
+            $referenced_columns = trim($m[4]);
+            $actions = isset($m[5]) ? $m[5] : '';
+            $on_delete = '';
+            $on_update = '';
+            if (preg_match('/\bON\s+DELETE\s+(RESTRICT|CASCADE|SET\s+NULL|NO\s+ACTION)\b/i', $actions, $action))
+            {
+                $on_delete = strtoupper(preg_replace('/\s+/', ' ', $action[1]));
+            }
+            if (preg_match('/\bON\s+UPDATE\s+(RESTRICT|CASCADE|SET\s+NULL|NO\s+ACTION)\b/i', $actions, $action))
+            {
+                $on_update = strtoupper(preg_replace('/\s+/', ' ', $action[1]));
+            }
+
+            // Both self-references and references to other restored tables use the temporary prefix.
+            if (strpos($referenced_table, $this->old_prefix) === 0)
+            {
+                $referenced_table = $temp_prefix.substr($referenced_table, strlen($this->old_prefix));
+            }
+
+            $constraint_sql = '';
+            if (!empty($m[1]))
+            {
+                $original_constraint_name = str_replace('``', '`', trim($m[1], '`'));
+                $constraint_name = $original_constraint_name;
+                $record_constraint = false;
+                if ($this->old_prefix !== '' && strpos($constraint_name, $this->old_prefix) === 0)
+                {
+                    $constraint_name = $temp_prefix.substr($constraint_name, strlen($this->old_prefix));
+                    if (strlen($constraint_name) > 64)
+                    {
+                        $constraint_name = $this->generate_temp_foreign_key_constraint_name($temp_prefix, $original_constraint_name, $child_table, $referenced_table);
+                        $record_constraint = true;
+                    }
+                }
+                elseif ($this->foreign_key_constraint_exists($constraint_name))
+                {
+                    $constraint_name = $this->generate_temp_foreign_key_constraint_name($temp_prefix, $constraint_name, $child_table, $referenced_table);
+                    $record_constraint = true;
+                }
+
+                if ($record_constraint)
+                {
+                    $this->record_temp_foreign_key_constraint($sub_task, $original_constraint_name, $constraint_name, $child_table, $child_columns, $referenced_table, $referenced_columns, $on_delete, $on_update);
+                }
+                $constraint_sql = 'CONSTRAINT `'.$this->wpvivid_escape_identifier($constraint_name).'` ';
+            }
+
+            // Preserve the column lists and ON DELETE / ON UPDATE text as supplied.
+            return $constraint_sql.'FOREIGN KEY ('.$child_columns.') REFERENCES `'
+                .$this->wpvivid_escape_identifier($referenced_table).'` ('.$referenced_columns.')'.$actions;
+        }, $query);
+    }
+
+    private function create_table($query,&$current_old_table,&$sub_task)
     {
         $table_name='';
-        if (preg_match('/^\s*CREATE TABLE +\`?([^\`]*)\`?/i', $query, $matches))
+        if (preg_match('/^\s*CREATE\s+TABLE(?:\s+IF\s+NOT\s+EXISTS)?\s+(`(?:``|[^`])+`|[^\s(;`]+)/i', $query, $matches))
         {
-            $table_name = $matches[1];
+            $table_name = str_replace('``', '`', trim($matches[1], '`'));
             $current_old_table=$table_name;
         }
 
@@ -1268,14 +1412,7 @@ class WPvivid_Restore_DB_2
             $new_table_name=$current_old_table;
         }
 
-        if($this->old_prefix !== '')
-        {
-            $query=str_replace($table_name,$new_table_name,$query);
-        }
-        else
-        {
-            $query=preg_replace('/'.$table_name.'/',$new_table_name,$query, 1);
-        }
+        $query=$this->rewrite_table_identifier($query,$table_name,$new_table_name);
 
         $table_name=$new_table_name;
 
@@ -1463,25 +1600,7 @@ class WPvivid_Restore_DB_2
         }
 
 
-        $constraints = array();
-        if (preg_match_all('/CONSTRAINT ([\a-zA-Z0-9_\']+) FOREIGN KEY \([a-zA-z0-9_\', ]+\) REFERENCES \'?([a-zA-z0-9_]+)\'? /i', $query, $constraint_matches))
-        {
-            $constraints = $constraint_matches;
-        }
-        else if (preg_match_all('/ FOREIGN KEY \([a-zA-z0-9_\', ]+\) REFERENCES \'?([a-zA-z0-9_]+)\'? /i', $query, $constraint_matches))
-        {
-            $constraints = $constraint_matches;
-        }
-        if (!empty($constraints) && $this->old_prefix != $this->new_prefix)
-        {
-            foreach ($constraints[0] as $constraint)
-            {
-                $updated_constraint = str_replace($this->old_prefix, $this->new_prefix, $constraint);
-                $query = str_replace($constraint, $updated_constraint, $query);
-            }
-            $this->log->WriteLog('replace foreign key.','notice');
-        }
-
+        $query = $this->rewrite_create_table_foreign_keys_for_temp($query, $sub_task, $table_name);
 
         if($this->execute_sql($query,$sub_task)===false)
         {
@@ -1493,9 +1612,9 @@ class WPvivid_Restore_DB_2
 
     private function lock_table($query,$sub_task)
     {
-        if (preg_match('/^\s*LOCK TABLES +\`?([^\`]*)\`?/i', $query, $matches))
+        if (preg_match('/^\s*LOCK\s+TABLES\s+(`(?:``|[^`])+`|[^\s(;`]+)/i', $query, $matches))
         {
-            $table_name = $matches[1];
+            $table_name = str_replace('``', '`', trim($matches[1], '`'));
 
             $tmp_option=$sub_task['options'];
             if($this->is_mu&&isset($tmp_option['site_id']))
@@ -1533,7 +1652,7 @@ class WPvivid_Restore_DB_2
             }
 
             $this->log->WriteLog('lock replace table:'.$table_name.' to :'.$new_table_name,'notice');
-            $query=str_replace($table_name,$new_table_name,$query);
+            $query=$this->rewrite_table_identifier($query,$table_name,$new_table_name);
         }
         if($this->execute_sql($query,$sub_task)===false)
         {
@@ -1558,20 +1677,13 @@ class WPvivid_Restore_DB_2
                     {
                         $new_table_name=$this->temp_new_prefix.substr($table_name,strlen($this->old_prefix));
                     }
-                    if($this->old_prefix !== '')
-                    {
-                        $query=str_replace($table_name,$new_table_name,$query);
-                    }
-                    else
-                    {
-                        $query=preg_replace('/'.$table_name.'/',$new_table_name,$query, 1);
-                    }
+                    $query=$this->rewrite_table_identifier($query,$table_name,$new_table_name);
                 }
             }
             else
             {
                 $new_table_name=$table_name;
-                $query=str_replace($table_name,$new_table_name,$query);
+                $query=$this->rewrite_table_identifier($query,$table_name,$new_table_name);
             }
         }
         else if($this->is_og_table($table_name))
@@ -1579,13 +1691,13 @@ class WPvivid_Restore_DB_2
             if(!empty($table_name))
             {
                 $new_table_name=$this->temp_new_prefix.substr($table_name,strlen($this->old_prefix));
-                $query=str_replace($table_name,$new_table_name,$query);
+                $query=$this->rewrite_table_identifier($query,$table_name,$new_table_name);
             }
         }
         else
         {
             $new_table_name=$table_name;
-            $query=str_replace($table_name,$new_table_name,$query);
+            $query=$this->rewrite_table_identifier($query,$table_name,$new_table_name);
         }
 
         if($this->execute_sql($query,$sub_task)===false)
@@ -1596,9 +1708,9 @@ class WPvivid_Restore_DB_2
 
     private function insert($query,$sub_task)
     {
-        if (preg_match('/^\s*INSERT INTO +\`?([^\`]*)\`?/i', $query, $matches))
+        if (preg_match('/^\s*INSERT\s+INTO\s+(`(?:``|[^`])+`|[^\s(;`]+)/i', $query, $matches))
         {
-            $table_name = $matches[1];
+            $table_name = str_replace('``', '`', trim($matches[1], '`'));
 
             $tmp_option=$sub_task['options'];
             if($this->is_mu&&isset($tmp_option['site_id']))
@@ -1635,14 +1747,7 @@ class WPvivid_Restore_DB_2
                 $new_table_name=$table_name;
             }
 
-            if($this->old_prefix !== '')
-            {
-                $query=str_replace($table_name,$new_table_name,$query);
-            }
-            else
-            {
-                $query=preg_replace('/'.$table_name.'/',$new_table_name,$query, 1);
-            }
+            $query=$this->rewrite_table_identifier($query,$table_name,$new_table_name);
         }
 
         if($this->execute_sql($query,$sub_task)===false)
@@ -1666,9 +1771,9 @@ class WPvivid_Restore_DB_2
 
     private function drop_table($query,$sub_task)
     {
-        if (preg_match('/^\s*DROP TABLE IF EXISTS +\`?([^\`]*)\`?\s*;/i', $query, $matches))
+        if (preg_match('/^\s*DROP\s+TABLE(?:\s+IF\s+EXISTS)?\s+(`(?:``|[^`])+`|[^\s(;`]+)\s*;/i', $query, $matches))
         {
-            $table_name = $matches[1];
+            $table_name = str_replace('``', '`', trim($matches[1], '`'));
 
             $tmp_option=$sub_task['options'];
             if($this->is_mu&&isset($tmp_option['site_id']))
@@ -1705,7 +1810,7 @@ class WPvivid_Restore_DB_2
                 $new_table_name=$table_name;
             }
 
-            $query=str_replace($table_name,$new_table_name,$query);
+            $query=$this->rewrite_table_identifier($query,$table_name,$new_table_name);
             $this->log->WriteLog('Drop table if exist '.$new_table_name,'notice');
         }
         if($this->execute_sql($query,$sub_task)===false)
@@ -2678,6 +2783,55 @@ class WPvivid_Restore_DB_2
         return $ret;
     }
 
+    private function is_safe_serialized_value($value)
+    {
+        if (!is_array($value))
+        {
+            return is_scalar($value) || is_null($value);
+        }
+
+        $has_recursion = false;
+        set_error_handler(function ($errno, $message) use (&$has_recursion)
+        {
+            $has_recursion = true;
+            return true;
+        }, E_WARNING);
+
+        try
+        {
+            count($value, COUNT_RECURSIVE);
+        }
+        catch (Throwable $error)
+        {
+            restore_error_handler();
+            throw $error;
+        }
+        restore_error_handler();
+
+        if ($has_recursion)
+        {
+            return false;
+        }
+
+        $pending = array($value);
+        while (!empty($pending))
+        {
+            $current = array_pop($pending);
+            foreach ($current as $item)
+            {
+                if (is_array($item))
+                {
+                    $pending[] = $item;
+                }
+                elseif (!is_scalar($item) && !is_null($item))
+                {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
     private function replace_row_data($old_data)
     {
         try{
@@ -2688,6 +2842,10 @@ class WPvivid_Restore_DB_2
             }
             else
             {
+                if (!$this->is_safe_serialized_value($unserialize_data))
+                {
+                    return $old_data;
+                }
                 $old_data=$this->replace_serialize_data($unserialize_data);
                 $old_data=serialize($old_data);
             }
@@ -2711,6 +2869,10 @@ class WPvivid_Restore_DB_2
             }
             else
             {
+                if (!$this->is_safe_serialized_value($serialize_data))
+                {
+                    return $data;
+                }
                 $data=serialize($this->replace_serialize_data($serialize_data));
             }
         }
@@ -3215,6 +3377,74 @@ class WPvivid_Restore_DB_2
         return $ret;
     }
 
+    private function restore_temp_foreign_key_constraint_names($sub_task, $temp_new_prefix, $final_prefix)
+    {
+        if (empty($sub_task['exec_sql']['temp_foreign_key_constraints']) || !is_array($sub_task['exec_sql']['temp_foreign_key_constraints'])) {
+            return;
+        }
+
+        global $wpdb;
+
+        foreach ($sub_task['exec_sql']['temp_foreign_key_constraints'] as $fk) {
+            if (empty($fk['original_constraint_name']) || empty($fk['temp_constraint_name']) || empty($fk['child_table'])) {
+                continue;
+            }
+
+            $final_child_table = (strpos($fk['child_table'], $temp_new_prefix) === 0 ? $final_prefix.substr($fk['child_table'], strlen($temp_new_prefix)) : $fk['child_table']);
+            $final_referenced_table = (strpos($fk['referenced_table'], $temp_new_prefix) === 0 ? $final_prefix.substr($fk['referenced_table'], strlen($temp_new_prefix)) : $fk['referenced_table']);
+            $original_constraint_name = $fk['original_constraint_name'];
+            $temp_constraint_name = $fk['temp_constraint_name'];
+
+            $table_exists = $wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $final_child_table));
+            if (empty($table_exists)) {
+                $this->log->WriteLog('Skip restoring foreign key constraint name because table does not exist: ' . $final_child_table, 'notice');
+                continue;
+            }
+
+            $temp_fk_exists = $wpdb->get_var($wpdb->prepare(
+                "SELECT CONSTRAINT_NAME FROM information_schema.TABLE_CONSTRAINTS WHERE CONSTRAINT_SCHEMA = DATABASE() AND CONSTRAINT_TYPE = 'FOREIGN KEY' AND TABLE_NAME = %s AND CONSTRAINT_NAME = %s LIMIT 1",
+                $final_child_table,
+                $temp_constraint_name
+            ));
+
+            if (empty($temp_fk_exists)) {
+                $this->log->WriteLog('Skip restoring foreign key constraint name because temporary constraint does not exist: ' . $temp_constraint_name, 'notice');
+                continue;
+            }
+
+            $original_fk_exists = $wpdb->get_var($wpdb->prepare(
+                "SELECT CONSTRAINT_NAME FROM information_schema.TABLE_CONSTRAINTS WHERE CONSTRAINT_SCHEMA = DATABASE() AND CONSTRAINT_TYPE = 'FOREIGN KEY' AND CONSTRAINT_NAME = %s LIMIT 1",
+                $original_constraint_name
+            ));
+
+            if (!empty($original_fk_exists)) {
+                $this->log->WriteLog('Skip restoring foreign key constraint name because original constraint name is still used: ' . $original_constraint_name, 'notice');
+                continue;
+            }
+
+            $final_child_table_sql = $this->wpvivid_escape_identifier($final_child_table);
+            $final_referenced_table_sql = $this->wpvivid_escape_identifier($final_referenced_table);
+            $temp_constraint_name_sql = $this->wpvivid_escape_identifier($temp_constraint_name);
+            $original_constraint_name_sql = $this->wpvivid_escape_identifier($original_constraint_name);
+
+            $sql = "ALTER TABLE `{$final_child_table_sql}` DROP FOREIGN KEY `{$temp_constraint_name_sql}`, ADD CONSTRAINT `{$original_constraint_name_sql}` FOREIGN KEY ({$fk['child_columns']}) REFERENCES `{$final_referenced_table_sql}` ({$fk['referenced_columns']})";
+
+            if (!empty($fk['on_delete'])) {
+                $sql .= ' ON DELETE ' . $fk['on_delete'];
+            }
+            if (!empty($fk['on_update'])) {
+                $sql .= ' ON UPDATE ' . $fk['on_update'];
+            }
+
+            $result = $wpdb->query($sql);
+            if ($result === false || !empty($wpdb->last_error)) {
+                $this->log->WriteLog('Restore foreign key constraint name failed. Keep temporary constraint name. SQL: ' . $sql . ' Error: ' . $wpdb->last_error, 'notice');
+            } else {
+                $this->log->WriteLog('Restore foreign key constraint name: ' . $temp_constraint_name . ' to ' . $original_constraint_name, 'notice');
+            }
+        }
+    }
+
     public function rename_db($sub_task)
     {
         global $wpdb;
@@ -3310,6 +3540,8 @@ class WPvivid_Restore_DB_2
             }
         }
 
+
+        $this->restore_temp_foreign_key_constraint_names($sub_task, $temp_new_prefix, $wpdb->prefix);
 
         wp_cache_flush();
         update_option('wpvivid_restore_task',$restore_task,'no');

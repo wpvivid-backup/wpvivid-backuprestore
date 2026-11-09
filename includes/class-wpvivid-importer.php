@@ -1367,6 +1367,55 @@ class WPvivid_media_importer
         }
     }
 
+    private function is_safe_serialized_value($value)
+    {
+        if (!is_array($value))
+        {
+            return is_scalar($value) || is_null($value);
+        }
+
+        $has_recursion = false;
+        set_error_handler(function ($errno, $message) use (&$has_recursion)
+        {
+            $has_recursion = true;
+            return true;
+        }, E_WARNING);
+
+        try
+        {
+            count($value, COUNT_RECURSIVE);
+        }
+        catch (Throwable $error)
+        {
+            restore_error_handler();
+            throw $error;
+        }
+        restore_error_handler();
+
+        if ($has_recursion)
+        {
+            return false;
+        }
+
+        $pending = array($value);
+        while (!empty($pending))
+        {
+            $current = array_pop($pending);
+            foreach ($current as $item)
+            {
+                if (is_array($item))
+                {
+                    $pending[] = $item;
+                }
+                elseif (!is_scalar($item) && !is_null($item))
+                {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
     private function replace_row_data($old_data)
     {
         $unserialize_data = @unserialize($old_data, array('allowed_classes' => false));
@@ -1376,6 +1425,10 @@ class WPvivid_media_importer
         }
         else
         {
+            if (!$this->is_safe_serialized_value($unserialize_data))
+            {
+                return $old_data;
+            }
             $old_data=$this->replace_serialize_data($unserialize_data);
             $old_data=serialize($old_data);
             /*if(is_array($unserialize_data))
@@ -1419,6 +1472,10 @@ class WPvivid_media_importer
             }
             else
             {
+                if (!$this->is_safe_serialized_value($serialize_data))
+                {
+                    return $data;
+                }
                 $data=serialize($this->replace_serialize_data($serialize_data));
             }
         }

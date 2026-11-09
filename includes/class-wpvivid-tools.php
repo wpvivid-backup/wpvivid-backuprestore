@@ -109,30 +109,7 @@ class WPvivid_tools
 
     public static function GetSaveLogFolder()
     {
-        $options = get_option('wpvivid_common_setting',array());
-
-        if(!isset($options['log_save_location']))
-        {
-            //WPvivid_Setting::set_default_common_option();
-            $options['log_save_location']=WPVIVID_DEFAULT_LOG_DIR;
-            update_option('wpvivid_common_setting', $options, 'no');
-
-            $options = get_option('wpvivid_common_setting',array());
-        }
-
-        if(!is_dir(WP_CONTENT_DIR.DIRECTORY_SEPARATOR.$options['log_save_location']))
-        {
-            @mkdir(WP_CONTENT_DIR.DIRECTORY_SEPARATOR.$options['log_save_location'],0777,true);
-            //@fopen(WP_CONTENT_DIR.DIRECTORY_SEPARATOR.$options['log_save_location'].DIRECTORY_SEPARATOR.'index.html', 'x');
-            $tempfile=@fopen(WP_CONTENT_DIR.DIRECTORY_SEPARATOR.$options['log_save_location'].DIRECTORY_SEPARATOR.'.htaccess', 'x');
-            if($tempfile)
-            {
-                //$text="deny from all";
-                $text="<IfModule mod_rewrite.c>\r\nRewriteEngine On\r\nRewriteRule .* - [F,L]\r\n</IfModule>";
-                fwrite($tempfile,$text );
-            }
-        }
-
-        return WP_CONTENT_DIR.DIRECTORY_SEPARATOR.$options['log_save_location'].DIRECTORY_SEPARATOR;
+        require_once WPVIVID_PLUGIN_DIR . '/includes/class-wpvivid-setting.php';
+        return WPvivid_Setting::get_log_directory();
     }
 }

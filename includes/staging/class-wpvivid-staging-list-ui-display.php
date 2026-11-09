@@ -1159,7 +1159,7 @@ class WPvivid_Staging_List_UI_Display_Free
                                 jQuery('#wpvivid_create_btn').hide();
                                 jQuery('#wpvivid_create_staging_step2').show();
                                 switch_staging_tab('create_staging');
-                                wpvivid_restart_staging();
+                                wpvivid_restart_staging(jsonarray.task_id);
                             }
                             else if (jsonarray.result === 'failed') {
                                 alert(jsonarray.error);

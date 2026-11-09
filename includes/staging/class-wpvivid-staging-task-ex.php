@@ -6,6 +6,7 @@ if (!defined('WPVIVID_PLUGIN_DIR'))
 class WPvivid_Staging_Task
 {
     public $task;
+    public $response_sent = false;
 
     public function __construct($task_id=false)
     {
@@ -81,6 +82,7 @@ class WPvivid_Staging_Task
     {
         $default = array();
         $tasks = get_option('wpvivid_staging_task_list', $default);
+        $saved_cleanup = isset($tasks[$this->task['id']]['cleanup']) ? $tasks[$this->task['id']]['cleanup'] : false;
 
         if($task===false)
         {
@@ -92,6 +94,13 @@ class WPvivid_Staging_Task
             $this->task=$task;
             $this->task['status']['run_time']=time();
             $tasks[$this->task['id']]=$this->task;
+        }
+        if (is_array($saved_cleanup))
+        {
+            $tables = isset($this->task['cleanup']['tables']) ? $this->task['cleanup']['tables'] : array();
+            $this->task['cleanup'] = $saved_cleanup;
+            $this->task['cleanup']['tables'] = array_values(array_unique(array_merge($saved_cleanup['tables'], $tables)));
+            $tasks[$this->task['id']] = $this->task;
         }
         update_option('wpvivid_staging_task_list',$tasks,'no');
     }
@@ -500,6 +509,7 @@ class WPvivid_Staging_Task
 
     private function flush()
     {
+        $this->response_sent = true;
         $ret['result']='success';
         $ret['task_id']=$this->task['id'];
         $json=wp_json_encode($ret);
@@ -520,7 +530,7 @@ class WPvivid_Staging_Task
         }
         else
         {
-            ob_flush();
+            if (ob_get_level() > 0) ob_flush();
             flush();
         }
     }
@@ -967,16 +977,11 @@ class WPvivid_Staging_Task
     public function cancel_staging()
     {
         $this->get_task();
-        //$default = array();
-        //$tasks = get_option('wpvivid_staging_task_list', $default);
+
         if( $this->task['status']['str']=='running' || $this->task['status']['str']=='ready' )
         {
-            //$this->task['status']['str']='cancel';
             update_option('wpvivid_staging_task_cancel', true, 'no');
         }
-
-        //$tasks[$this->task['id']]=$this->task;
-        //update_option('wpvivid_staging_task_list',$tasks);
     }
 
     public function update_calc_db_size($key)
